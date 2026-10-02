@@ -22,8 +22,8 @@ class MainActivity : AppCompatActivity() {
     private var webRTCClient: com.thinclient.network.WebRTCClient? = null
     private val gson = Gson()
     private val client = OkHttpClient()
-    private val baseUrl = "http://10.0.2.2:8080"
-    private val wsUrl = "ws://10.0.2.2:8080/v1/ws"
+    private val baseUrl = "https://cheka.onrender.com"
+    private val wsUrl = "wss://cheka.onrender.com/v1/ws"
     private var jwtToken: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
