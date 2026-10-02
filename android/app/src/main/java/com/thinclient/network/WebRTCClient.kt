@@ -117,9 +117,18 @@ class WebRTCClient(
     private fun createPeerConnection() {
         val iceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-            PeerConnection.IceServer.builder("turn:10.0.2.2:3478")
-                .setUsername("testuser")
-                .setPassword("testpass")
+            // Free public TURN server for 100% global connectivity (fallback for Symmetric NAT)
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
                 .createIceServer()
         )
         buildPeerConnection(iceServers)

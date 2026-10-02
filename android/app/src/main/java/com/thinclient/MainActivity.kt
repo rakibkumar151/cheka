@@ -80,7 +80,7 @@ class MainActivity : AppCompatActivity() {
                 view?.updateStats(0, 0, 0, 0)
             }
         }
-        wc.fetchTurnAndRestartIce()
+        // wc.fetchTurnAndRestartIce() // DISABLED: Dynamic ICE config breaks Android WebRTC ICE gathering
         wc.startStatsTimer()
         return wc
     }
