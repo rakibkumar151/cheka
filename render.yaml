@@ -15,4 +15,14 @@ services:
         generateValue: true
       - key: TURN_URL
         value: "turn:openrelay.metered.ca:80"
-      # You need to manually add TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in Render Dashboard
+
+  - type: web
+    name: thinclient-turn-server
+    env: docker
+    region: frankfurt
+    plan: free
+    dockerContext: turn-server/
+    dockerfilePath: turn-server/Dockerfile
+    envVars:
+      - key: PORT
+        value: "3478"

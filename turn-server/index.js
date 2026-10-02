@@ -1,12 +1,14 @@
 const Turn = require('node-turn');
 
+// Render provides the port in the PORT environment variable
+const port = process.env.PORT || 3478;
+
 const server = new Turn({
   // set listening port
-  listeningPort: 3478,
+  listeningPort: port,
   // set authentication
   authMech: 'long-term',
   credentials: {
-    // We will hardcode testuser:testpass for local testing
     "testuser": "testpass"
   }
 });
@@ -14,8 +16,7 @@ const server = new Turn({
 server.start();
 
 console.log("=========================================");
-console.log("✅ Local TURN Server started on port 3478");
+console.log(`✅ Local TURN Server started on port ${port}`);
 console.log("Username: testuser");
 console.log("Password: testpass");
-console.log("URL: turn:10.0.2.2:3478 (from emulator)");
 console.log("=========================================");
