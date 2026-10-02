@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.80-slim-bullseye AS builder
+FROM rust:1.80-slim-bookworm AS builder
 
 WORKDIR /usr/src/app
 COPY . .
@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev
 RUN cargo build --release
 
 # Runtime stage
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 WORKDIR /usr/src/app
 COPY --from=builder /usr/src/app/target/release/server /usr/src/app/server
