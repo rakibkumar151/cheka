@@ -86,7 +86,12 @@ class WebRTCClient(
         Log.i("WebRTCClient", "[$callId] Initializing WebRTCClient")
         ensureInitialized(context)   // no-op if already done
         createPeerConnection()
-        checkPermissionAndCreateAudioTrack()
+        // Run audio track creation on a background thread with retry
+        // so previous call's audio hardware has time to fully release
+        Thread {
+            Thread.sleep(150) // brief pause for audio HW to release between calls
+            checkPermissionAndCreateAudioTrack()
+        }.apply { isDaemon = true; start() }
     }
 
 
@@ -109,8 +114,24 @@ class WebRTCClient(
             isSpeaker = true
 
             val constraints = MediaConstraints()
-            audioSource = sharedFactory?.createAudioSource(constraints)
+
+            // Retry up to 3 times if audio source returns null
+            // (can happen if previous call's hardware hasn't fully released)
+            var attempts = 0
+            while (audioSource == null && attempts < 3) {
+                if (attempts > 0) {
+                    Log.w("WebRTCClient", "[$callId] audioSource null on attempt $attempts, retrying...")
+                    Thread.sleep(300)
+                }
+                audioSource = sharedFactory?.createAudioSource(constraints)
+                attempts++
+            }
             audioSourceCreated = (audioSource != null)
+
+            if (audioSource == null) {
+                Log.e("WebRTCClient", "[$callId] createAudioSource returned null after $attempts attempts!")
+                return
+            }
 
             localAudioTrack = sharedFactory?.createAudioTrack("audio0", audioSource)
             localAudioTrack?.setEnabled(true)
@@ -161,8 +182,15 @@ class WebRTCClient(
                     PeerConnection.IceConnectionState.CONNECTED,
                     PeerConnection.IceConnectionState.COMPLETED ->
                         onConnectionStateChange?.invoke("CONNECTED")
-                    PeerConnection.IceConnectionState.FAILED ->
+                    PeerConnection.IceConnectionState.FAILED -> {
                         onConnectionStateChange?.invoke("FAILED")
+                        // Stop ICE gathering immediately on failure to avoid flooding server
+                        // with candidates that can never connect
+                        if (!closed.get()) {
+                            Log.i("WebRTCClient", "[$callId] ICE FAILED — disposing peerConnection to stop candidate spam")
+                            close()
+                        }
+                    }
                     PeerConnection.IceConnectionState.DISCONNECTED ->
                         onConnectionStateChange?.invoke("RECONNECTING")
                     PeerConnection.IceConnectionState.CHECKING ->
@@ -185,6 +213,11 @@ class WebRTCClient(
 
             override fun onIceCandidate(candidate: IceCandidate?) {
                 if (candidate == null) return
+                // Don't send candidates if this call is already closed
+                if (closed.get()) {
+                    Log.d("WebRTCClient", "[$callId] Skipping ICE candidate — call closed")
+                    return
+                }
                 val n = localCandidatesGenerated.incrementAndGet()
                 val type = candidate.sdp.substringAfter("typ ", "").substringBefore(" ")
                 val ip = candidate.sdp.split(" ").getOrNull(4) ?: "unknown"
