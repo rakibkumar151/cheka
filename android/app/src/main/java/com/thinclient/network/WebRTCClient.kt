@@ -139,8 +139,22 @@ class WebRTCClient(
             localTrackCreated = (localAudioTrack != null)
 
             if (localAudioTrack != null) {
-                val sender = peerConnection?.addTrack(localAudioTrack, listOf("stream0"))
-                senderPresent = (sender != null)
+                val transceivers = peerConnection?.transceivers
+                var trackAttached = false
+                if (transceivers != null) {
+                    for (t in transceivers) {
+                        if (t.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO) {
+                            t.sender.setTrack(localAudioTrack, true)
+                            trackAttached = true
+                            senderPresent = true
+                            break
+                        }
+                    }
+                }
+                if (!trackAttached) {
+                    val sender = peerConnection?.addTrack(localAudioTrack, listOf("stream0"))
+                    senderPresent = (sender != null)
+                }
                 Log.i("WebRTCClient", "[$callId] Audio track added. Sender present: $senderPresent")
             }
         } catch (e: Exception) {
@@ -260,6 +274,14 @@ class WebRTCClient(
                 }
             }
         })
+
+        // Force the SDP to include an audio transceiver, so we can negotiate it 
+        // even if the physical AudioTrack hasn't finished initializing on the background thread.
+        val init = RtpTransceiver.RtpTransceiverInit(
+            RtpTransceiver.RtpTransceiverDirection.SEND_RECV,
+            listOf("stream0")
+        )
+        peerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, init)
 
         Log.i("WebRTCClient", "[$callId] PeerConnection created, ICE servers: ${iceServers.size}")
     }
