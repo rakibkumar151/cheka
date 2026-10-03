@@ -184,12 +184,9 @@ class WebRTCClient(
                         onConnectionStateChange?.invoke("CONNECTED")
                     PeerConnection.IceConnectionState.FAILED -> {
                         onConnectionStateChange?.invoke("FAILED")
-                        // Stop ICE gathering immediately on failure to avoid flooding server
-                        // with candidates that can never connect
-                        if (!closed.get()) {
-                            Log.i("WebRTCClient", "[$callId] ICE FAILED — disposing peerConnection to stop candidate spam")
-                            close()
-                        }
+                        // NOTE: Do NOT call close() or dispose() here!
+                        // Calling peerConnection.dispose() from within its own callback
+                        // causes a native crash. MainActivity handles cleanup via onConnectionStateChange.
                     }
                     PeerConnection.IceConnectionState.DISCONNECTED ->
                         onConnectionStateChange?.invoke("RECONNECTING")
