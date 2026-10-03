@@ -250,22 +250,22 @@ pub async fn handle_action(
                 let schema = if is_video {
                     crate::sdui::build_active_video_call_screen(
                         "Peer", 
-                        req.action_id == "call.mute", 
-                        req.action_id != "call.camera_off", 
+                        false, // default to false since stateless
+                        true, // default to true to allow toggling off
                         &call_id, 
                         2
                     )
                 } else {
                     crate::sdui::build_active_audio_call_screen(
                         "Peer", 
-                        req.action_id == "call.mute", 
+                        false,
                         &call_id, 
                         2
                     )
                 };
 
                 let msg = WsMessage {
-                    msg_type: WsMessageType::CallAccepted,
+                    msg_type: WsMessageType::CallAccepted, // Re-use CallAccepted as UI update for calls
                     request_id: Uuid::new_v4().to_string(),
                     session_id: claims.session_id.clone(),
                     call_id: Some(call_id.clone()),
@@ -273,7 +273,14 @@ pub async fn handle_action(
                     payload: serde_json::to_value(schema).unwrap_or_default(),
                 };
 
-                route_to_user(&claims.sub, &msg, &state).await;
+                // Broadcast to all participants
+                if let Ok(mut p_rows) = db.query("SELECT user_id FROM call_participants WHERE call_id = ?1", [call_id.clone()]).await {
+                    while let Ok(Some(p_row)) = p_rows.next().await {
+                        if let Ok(uid) = p_row.get::<String>(0) {
+                            route_to_user(&uid, &msg, &state).await;
+                        }
+                    }
+                }
             }
         }
         Err(e) => tracing::error!("DB query failed in handle_action: {}", e),
