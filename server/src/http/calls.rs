@@ -49,10 +49,17 @@ pub async fn create_call(
         return (StatusCode::BAD_REQUEST, axum::Json(CreateCallResponse { call_id: "".into(), state: "FAILED".into(), kind: payload.call_type })).into_response();
     }
 
+    // Fresh connection per request — never panics on stream expiry
+    let db = match state.db.connect() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("DB connect failed in create_call: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(CreateCallResponse { call_id: "".into(), state: "FAILED".into(), kind: payload.call_type })).into_response();
+        }
+    };
+
     let call_id = Uuid::new_v4().to_string();
 
-    // 1. Store call session in DB (Turso)
-    let db = &state.db;
     let _ = db
         .execute(
             "INSERT INTO call_sessions (id, caller_id, status, kind) VALUES (?1, ?2, 'initiating', ?3)",
@@ -65,25 +72,20 @@ pub async fn create_call(
         (call_id.clone(), caller_id.clone(), payload.target_user_id.clone())
     ).await;
 
-    // 2. Publish call.incoming to target_user_id via internal TCP gateway
     let sdui_payload = crate::sdui::build_incoming_call_screen(&caller_id, "avatar_url", &call_id, 1);
 
     let msg = WsMessage {
         msg_type: WsMessageType::CallIncoming,
         request_id: Uuid::new_v4().to_string(),
-        session_id: claims.session_id.clone(), // Assuming claims has session_id, wait, it has sub
+        session_id: claims.session_id.clone(),
         call_id: Some(call_id.clone()),
         seq: 1,
-        payload: serde_json::to_value(sdui_payload).unwrap(),
+        payload: serde_json::to_value(sdui_payload).unwrap_or_default(),
     };
 
     route_to_user(&payload.target_user_id, &msg, &state).await;
 
-    // 3. Push SDUI to caller (INITIATING -> RINGING)
-    // The client will update its own UI, but we can also push a schema back if needed.
-    // For now, the client updates its UI based on the HTTP response.
-
-    (StatusCode::CREATED, Json(CreateCallResponse { 
+    (StatusCode::CREATED, Json(CreateCallResponse {
         call_id,
         state: "RINGING".to_string(),
         kind: payload.call_type
@@ -95,40 +97,59 @@ pub async fn accept_call(
     axum::extract::Path(call_id): axum::extract::Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    let _ = state.db.execute("UPDATE call_sessions SET status = 'active' WHERE id = ?1", [call_id.clone()]).await;
+    // Fresh connection — safe from stream-not-found panics
+    let db = match state.db.connect() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("DB connect failed in accept_call: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
 
-    let mut kind_rows = state.db.query("SELECT kind FROM call_sessions WHERE id = ?1", [call_id.clone()]).await.unwrap();
+    let _ = db.execute("UPDATE call_sessions SET status = 'active' WHERE id = ?1", [call_id.clone()]).await;
+
     let mut is_video = false;
-    if let Ok(Some(row)) = kind_rows.next().await {
-        let kind_str: String = row.get(0).unwrap();
-        is_video = kind_str == "video";
+    match db.query("SELECT kind FROM call_sessions WHERE id = ?1", [call_id.clone()]).await {
+        Ok(mut kind_rows) => {
+            if let Ok(Some(row)) = kind_rows.next().await {
+                let kind_str: String = row.get(0).unwrap_or_default();
+                is_video = kind_str == "video";
+            }
+        }
+        Err(e) => tracing::warn!("Could not fetch call kind for {}: {}", call_id, e),
     }
 
     // Get the caller so we can notify them
-    let mut rows = state.db.query("SELECT user_id FROM call_participants WHERE call_id = ?1 AND role = 'caller'", [call_id.clone()]).await.unwrap();
-    if let Ok(Some(row)) = rows.next().await {
-        let caller_id: String = row.get(0).unwrap();
-        tracing::info!("Found caller_id for call {}: {}", call_id, caller_id);
-        
-        let schema = if is_video {
-            crate::sdui::build_active_video_call_screen(&claims.sub, false, true, &call_id, 1)
-        } else {
-            crate::sdui::build_active_audio_call_screen(&claims.sub, false, &call_id, 1)
-        };
+    match db.query("SELECT user_id FROM call_participants WHERE call_id = ?1 AND role = 'caller'", [call_id.clone()]).await {
+        Ok(mut rows) => {
+            if let Ok(Some(row)) = rows.next().await {
+                let caller_id: String = row.get(0).unwrap_or_default();
+                tracing::info!("Found caller_id for call {}: {}", call_id, caller_id);
 
-        let msg = WsMessage {
-            msg_type: WsMessageType::CallAccepted,
-            request_id: Uuid::new_v4().to_string(),
-            session_id: claims.session_id.clone(),
-            call_id: Some(call_id.clone()),
-            seq: 2,
-            payload: serde_json::to_value(schema).unwrap(),
-        };
-        route_to_user(&caller_id, &msg, &state).await;
-    } else {
-        tracing::error!("Could not find caller_id for call {}", call_id);
+                let schema = if is_video {
+                    crate::sdui::build_active_video_call_screen(&claims.sub, false, true, &call_id, 1)
+                } else {
+                    crate::sdui::build_active_audio_call_screen(&claims.sub, false, &call_id, 1)
+                };
+
+                let msg = WsMessage {
+                    msg_type: WsMessageType::CallAccepted,
+                    request_id: Uuid::new_v4().to_string(),
+                    session_id: claims.session_id.clone(),
+                    call_id: Some(call_id.clone()),
+                    seq: 2,
+                    payload: serde_json::to_value(schema).unwrap_or_default(),
+                };
+                route_to_user(&caller_id, &msg, &state).await;
+            } else {
+                tracing::error!("Could not find caller_id for call {}", call_id);
+            }
+        }
+        Err(e) => {
+            tracing::error!("DB query failed in accept_call (caller lookup) for {}: {}", call_id, e);
+        }
     }
-    
+
     // Also push active call screen to callee
     let callee_schema = if is_video {
         crate::sdui::build_active_video_call_screen("Caller", false, true, &call_id, 1)
@@ -137,12 +158,12 @@ pub async fn accept_call(
     };
 
     let callee_msg = WsMessage {
-        msg_type: WsMessageType::SduiUpdate, // Use SduiUpdate so callee doesn't create Offer!
+        msg_type: WsMessageType::SduiUpdate,
         request_id: Uuid::new_v4().to_string(),
         session_id: claims.session_id.clone(),
         call_id: Some(call_id.clone()),
         seq: 2,
-        payload: serde_json::to_value(callee_schema).unwrap(),
+        payload: serde_json::to_value(callee_schema).unwrap_or_default(),
     };
     route_to_user(&claims.sub, &callee_msg, &state).await;
 
@@ -154,25 +175,35 @@ pub async fn reject_call(
     axum::extract::Path(call_id): axum::extract::Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    let _ = state.db.execute("UPDATE call_sessions SET status = 'ended' WHERE id = ?1", [call_id.clone()]).await;
+    let db = match state.db.connect() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("DB connect failed in reject_call: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
 
-    // Get the caller so we can notify them
-    let mut rows = state.db.query("SELECT user_id FROM call_participants WHERE call_id = ?1 AND role = 'caller'", [call_id.clone()]).await.unwrap();
-    if let Ok(Some(row)) = rows.next().await {
-        let caller_id: String = row.get(0).unwrap();
-        
-        let msg = WsMessage {
-            msg_type: WsMessageType::CallRejected,
-            request_id: Uuid::new_v4().to_string(),
-            session_id: claims.session_id.clone(),
-            call_id: Some(call_id.clone()),
-            seq: 2,
-            payload: serde_json::json!({}), // or push home screen
-        };
-        route_to_user(&caller_id, &msg, &state).await;
+    let _ = db.execute("UPDATE call_sessions SET status = 'ended' WHERE id = ?1", [call_id.clone()]).await;
+
+    match db.query("SELECT user_id FROM call_participants WHERE call_id = ?1 AND role = 'caller'", [call_id.clone()]).await {
+        Ok(mut rows) => {
+            if let Ok(Some(row)) = rows.next().await {
+                let caller_id: String = row.get(0).unwrap_or_default();
+
+                let msg = WsMessage {
+                    msg_type: WsMessageType::CallRejected,
+                    request_id: Uuid::new_v4().to_string(),
+                    session_id: claims.session_id.clone(),
+                    call_id: Some(call_id.clone()),
+                    seq: 2,
+                    payload: serde_json::json!({}),
+                };
+                route_to_user(&caller_id, &msg, &state).await;
+            }
+        }
+        Err(e) => tracing::error!("DB query failed in reject_call: {}", e),
     }
 
-    // Push home screen to callee
     crate::sdui::push_sdui_to_local_users(&state).await;
 
     StatusCode::OK
@@ -189,27 +220,37 @@ pub async fn handle_action(
     State(state): State<Arc<AppState>>,
     axum::Json(req): axum::Json<CallActionReq>,
 ) -> impl IntoResponse {
-    let mut rows = state.db.query("SELECT role FROM call_participants WHERE call_id = ?1 AND user_id = ?2", [call_id.clone(), claims.sub.clone()]).await.unwrap();
-    if let Ok(Some(_)) = rows.next().await {
-        // Just mock the state mutation for now based on action_id
-        let is_video = req.action_id.contains("camera") || req.action_id == "call.start_video";
-        let schema = if is_video {
-            crate::sdui::build_active_video_call_screen("Peer", req.action_id == "call.mute", req.action_id != "call.camera_off", &call_id, 2)
-        } else {
-            crate::sdui::build_active_audio_call_screen("Peer", req.action_id == "call.mute", &call_id, 2)
-        };
-        
-        let msg = WsMessage {
-            msg_type: WsMessageType::CallAccepted, // Reuse CallAccepted to replace screen
-            request_id: Uuid::new_v4().to_string(),
-            session_id: claims.session_id.clone(),
-            call_id: Some(call_id.clone()),
-            seq: 3,
-            payload: serde_json::to_value(schema).unwrap(),
-        };
-        
-        // Only send the updated mute/camera toggle to the user who requested it!
-        route_to_user(&claims.sub, &msg, &state).await;
+    let db = match state.db.connect() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("DB connect failed in handle_action: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
+
+    match db.query("SELECT role FROM call_participants WHERE call_id = ?1 AND user_id = ?2", [call_id.clone(), claims.sub.clone()]).await {
+        Ok(mut rows) => {
+            if let Ok(Some(_)) = rows.next().await {
+                let is_video = req.action_id.contains("camera") || req.action_id == "call.start_video";
+                let schema = if is_video {
+                    crate::sdui::build_active_video_call_screen("Peer", req.action_id == "call.mute", req.action_id != "call.camera_off", &call_id, 2)
+                } else {
+                    crate::sdui::build_active_audio_call_screen("Peer", req.action_id == "call.mute", &call_id, 2)
+                };
+
+                let msg = WsMessage {
+                    msg_type: WsMessageType::CallAccepted,
+                    request_id: Uuid::new_v4().to_string(),
+                    session_id: claims.session_id.clone(),
+                    call_id: Some(call_id.clone()),
+                    seq: 3,
+                    payload: serde_json::to_value(schema).unwrap_or_default(),
+                };
+
+                route_to_user(&claims.sub, &msg, &state).await;
+            }
+        }
+        Err(e) => tracing::error!("DB query failed in handle_action: {}", e),
     }
 
     StatusCode::OK
@@ -228,14 +269,22 @@ pub async fn get_turn_credentials(
     axum::extract::Path(call_id): axum::extract::Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    // Verify caller is participant
-    let rows = state.db.query(
+    let db = match state.db.connect() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("DB connect failed in get_turn_credentials: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))).into_response();
+        }
+    };
+
+    match db.query(
         "SELECT user_id FROM call_participants WHERE call_id = ?1 AND user_id = ?2",
         (call_id.clone(), claims.sub.clone())
-    ).await;
-
-    match rows {
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))).into_response(),
+    ).await {
+        Err(e) => {
+            tracing::error!("DB query failed in get_turn_credentials: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))).into_response();
+        }
         Ok(mut r) => {
             if let Ok(None) = r.next().await {
                 return (StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "not a participant"}))).into_response();
@@ -243,7 +292,6 @@ pub async fn get_turn_credentials(
         }
     }
 
-    // Generate temporary TURN credentials (RFC 8489 style HMAC-SHA1)
     let ttl_secs: u64 = 3600;
     let expiry = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

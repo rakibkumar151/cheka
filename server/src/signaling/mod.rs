@@ -14,13 +14,26 @@ pub async fn process_message(msg: WsMessage, user_id: &str, state: &Arc<AppState
     match msg.msg_type {
         WsMessageType::CallOffer | WsMessageType::CallAnswer | WsMessageType::CallIce => {
             if let Some(call_id) = &msg.call_id {
-                if let Ok(mut rows) = state.db.query("SELECT user_id FROM call_participants WHERE call_id = ?1 AND user_id != ?2", [call_id.clone(), user_id.to_string()]).await {
-                    if let Ok(Some(row)) = rows.next().await {
-                        let target_user_id: String = row.get(0).unwrap();
-                        tracing::info!("Routing {:?} from {} to {}", msg.msg_type, user_id, target_user_id);
-                        route_to_user(&target_user_id, &msg, state).await;
-                    } else {
-                        tracing::error!("Could not find peer for call {}", call_id);
+                // Fresh connection per message — never panics on Turso stream expiry
+                let db = match state.db.connect() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!("DB connect failed in signaling for call {}: {}", call_id, e);
+                        return;
+                    }
+                };
+                match db.query("SELECT user_id FROM call_participants WHERE call_id = ?1 AND user_id != ?2", [call_id.clone(), user_id.to_string()]).await {
+                    Ok(mut rows) => {
+                        if let Ok(Some(row)) = rows.next().await {
+                            let target_user_id: String = row.get(0).unwrap_or_default();
+                            tracing::info!("Routing {:?} from {} to {}", msg.msg_type, user_id, target_user_id);
+                            route_to_user(&target_user_id, &msg, state).await;
+                        } else {
+                            tracing::info!("No local connection or peer found for user {}", user_id);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("DB query failed in signaling for call {}: {}", call_id, e);
                     }
                 }
             }

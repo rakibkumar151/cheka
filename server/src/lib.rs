@@ -18,7 +18,7 @@ pub mod ws;
 #[derive(Clone)]
 pub struct AppState {
     pub config: config::Config,
-    pub db: Arc<libsql::Connection>,
+    pub db: Arc<libsql::Database>,   // Database handle, not a Connection — connections are per-request
     pub gateway: Arc<crate::gateway::GatewayState>,
     pub presence: Arc<crate::presence::PresenceManager>,
 }

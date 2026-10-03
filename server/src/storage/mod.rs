@@ -1,7 +1,7 @@
-use libsql::{Builder, Connection};
+use libsql::{Builder, Database};
 use tracing::info;
 
-pub async fn init_db(url: &str, token: &str) -> anyhow::Result<Connection> {
+pub async fn init_db(url: &str, token: &str) -> anyhow::Result<Database> {
     info!("Initializing libSQL/Turso connection");
 
     // Check if local or remote
@@ -13,11 +13,11 @@ pub async fn init_db(url: &str, token: &str) -> anyhow::Result<Connection> {
         Builder::new_local(url).build().await?
     };
 
+    // Run migrations on a fresh connection, then release it
     let conn = db.connect()?;
-
     run_migrations(&conn).await?;
 
-    Ok(conn)
+    Ok(db)  // Return the Database handle, not the Connection
 }
 
 async fn run_migrations(conn: &Connection) -> anyhow::Result<()> {
