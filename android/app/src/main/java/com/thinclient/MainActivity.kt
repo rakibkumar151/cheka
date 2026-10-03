@@ -57,10 +57,7 @@ class MainActivity : AppCompatActivity() {
         val componentsList = schema.components ?: emptyList()
         val patchedComponents = componentsList.map { comp ->
             when (comp.action) {
-                "call.camera_off", "call.camera_on" -> comp.copy(
-                    action = if (isCameraOn) "call.camera_off" else "call.camera_on",
-                    text = if (isCameraOn) "Turn Camera Off" else "Turn Camera On"
-                )
+
                 "call.mute", "call.unmute" -> comp.copy(
                     action = if (isMuted) "call.unmute" else "call.mute",
                     text = if (isMuted) "Unmute" else "Mute"
@@ -173,9 +170,9 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun createWebRTCClient(callId: String, isVideoCall: Boolean): com.thinclient.network.WebRTCClient {
+    private fun createWebRTCClient(callId: String): com.thinclient.network.WebRTCClient {
         val wc = com.thinclient.network.WebRTCClient(
-            this, signalingClient!!, callId, jwtToken, baseUrl, isVideoCall
+            this, signalingClient!!, callId, jwtToken, baseUrl
         )
         wc.onConnectionStateChange = { state ->
             Log.i("MainActivity", "[$callId] WebRTC state → $state")
@@ -204,7 +201,6 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 val view = sduiRenderer.render(patchSchema(schema))
                 setContentView(view)
-                webRTCClient?.attachVideoRenderers()
             }
         }, { newCallId ->
             runOnUiThread { activeCallId = newCallId }
@@ -220,15 +216,6 @@ class MainActivity : AppCompatActivity() {
                     isMuted = false
                     webRTCClient?.setMuted(false)
                 }
-                "call.camera_on" -> {
-                    isCameraOn = true
-                    webRTCClient?.toggleVideo(true)
-                }
-                "call.camera_off" -> {
-                    isCameraOn = false
-                    webRTCClient?.toggleVideo(false)
-                }
-                "call.camera_switch" -> webRTCClient?.switchCamera()
                 "call.end"    -> {
                     // End Call button pressed — close everything and go home
                     val callId = data
@@ -270,8 +257,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         runOnUiThread {
                             if (webRTCClient == null) {
-                                val isVideo = schema?.components?.any { it.type == "local_video" || it.type == "remote_video" } ?: false
-                                webRTCClient = createWebRTCClient(callId, isVideo)
+                                webRTCClient = createWebRTCClient(callId)
                                 webRTCClient?.startCall()
                             }
                         }
@@ -279,7 +265,6 @@ class MainActivity : AppCompatActivity() {
                             runOnUiThread {
                                 val view = sduiRenderer.render(patchSchema(schema))
                                 setContentView(view)
-                                webRTCClient?.attachVideoRenderers()
                             }
                         }
                     }
@@ -291,7 +276,6 @@ class MainActivity : AppCompatActivity() {
                             runOnUiThread {
                                 val view = sduiRenderer.render(schema)
                                 setContentView(view)
-                                webRTCClient?.attachVideoRenderers()
                             }
                         }
                     }
@@ -307,12 +291,7 @@ class MainActivity : AppCompatActivity() {
                         val sdp = payload.get("sdp").asString
                         runOnUiThread {
                             if (webRTCClient == null) {
-                                // For callee, the active call screen (and its schema) might already be rendered
-                                // Let's try to detect if it's a video call by checking if we have a video renderer in the view tree
-                                val root = findViewById<android.view.View>(android.R.id.content)
-                                val isVideo = root?.findViewWithTag<android.view.View>("local_video_renderer") != null ||
-                                              root?.findViewWithTag<android.view.View>("remote_video_renderer") != null
-                                webRTCClient = createWebRTCClient(callId, isVideo)
+                                webRTCClient = createWebRTCClient(callId)
                             }
                             webRTCClient?.handleOffer(sdp)
                         }

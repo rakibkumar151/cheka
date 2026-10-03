@@ -14,10 +14,7 @@ pub enum SduiComponentType {
     Row,
     Column,
     CallTimer,
-    LocalVideo,
-    RemoteVideo,
     MicState,
-    CameraState,
     ConnectionState,
     Input,
     AudioVisualizer,
@@ -29,8 +26,6 @@ pub enum SduiActionId {
     Navigate,
     #[serde(rename = "call.start_audio")]
     CallStartAudio,
-    #[serde(rename = "call.start_video")]
-    CallStartVideo,
     #[serde(rename = "call.accept")]
     CallAccept,
     #[serde(rename = "call.reject")]
@@ -41,14 +36,6 @@ pub enum SduiActionId {
     CallMute,
     #[serde(rename = "call.unmute")]
     CallUnmute,
-    #[serde(rename = "call.camera_on")]
-    CallCameraOn,
-    #[serde(rename = "call.camera_off")]
-    CallCameraOff,
-    #[serde(rename = "call.camera_switch")]
-    CallCameraSwitch,
-    #[serde(rename = "call.switch_audio")]
-    CallSwitchAudio,
     Retry,
     Logout,
     #[serde(rename = "copy_text")]
@@ -152,14 +139,6 @@ pub fn build_home_screen(my_uid: &str, online_users: &[(String, UserPresence)], 
                         component_type: SduiComponentType::Button,
                         text: Some("[AUDIO]".to_string()),
                         action: Some(SduiActionId::CallStartAudio),
-                        data: Some(uid.clone()),
-                        style: None, children: vec![],
-                    },
-                    SduiComponent {
-                        id: format!("btn_video_{}", uid),
-                        component_type: SduiComponentType::Button,
-                        text: Some("[VIDEO]".to_string()),
-                        action: Some(SduiActionId::CallStartVideo),
                         data: Some(uid.clone()),
                         style: None, children: vec![],
                     }

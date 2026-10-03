@@ -108,17 +108,6 @@ pub async fn accept_call(
 
     let _ = db.execute("UPDATE call_sessions SET status = 'active' WHERE id = ?1", [call_id.clone()]).await;
 
-    let mut is_video = false;
-    match db.query("SELECT kind FROM call_sessions WHERE id = ?1", [call_id.clone()]).await {
-        Ok(mut kind_rows) => {
-            if let Ok(Some(row)) = kind_rows.next().await {
-                let kind_str: String = row.get(0).unwrap_or_default();
-                is_video = kind_str == "video";
-            }
-        }
-        Err(e) => tracing::warn!("Could not fetch call kind for {}: {}", call_id, e),
-    }
-
     // Get the caller so we can notify them
     match db.query("SELECT user_id FROM call_participants WHERE call_id = ?1 AND role = 'caller'", [call_id.clone()]).await {
         Ok(mut rows) => {
@@ -126,11 +115,7 @@ pub async fn accept_call(
                 let caller_id: String = row.get(0).unwrap_or_default();
                 tracing::info!("Found caller_id for call {}: {}", call_id, caller_id);
 
-                let schema = if is_video {
-                    crate::sdui::build_active_video_call_screen(&claims.sub, false, true, &call_id, 1)
-                } else {
-                    crate::sdui::build_active_audio_call_screen(&claims.sub, false, &call_id, 1)
-                };
+                let schema = crate::sdui::build_active_audio_call_screen(&claims.sub, false, &call_id, 1);
 
                 let msg = WsMessage {
                     msg_type: WsMessageType::CallAccepted,
@@ -151,11 +136,7 @@ pub async fn accept_call(
     }
 
     // Also push active call screen to callee
-    let callee_schema = if is_video {
-        crate::sdui::build_active_video_call_screen("Caller", false, true, &call_id, 1)
-    } else {
-        crate::sdui::build_active_audio_call_screen("Caller", false, &call_id, 1)
-    };
+    let callee_schema = crate::sdui::build_active_audio_call_screen("Caller", false, &call_id, 1);
 
     let callee_msg = WsMessage {
         msg_type: WsMessageType::SduiUpdate,
@@ -238,32 +219,12 @@ pub async fn handle_action(
                     }
                 }
 
-                if req.action_id == "call.camera_on" {
-                    kind = "video".to_string();
-                    let _ = db.execute("UPDATE call_sessions SET kind = 'video' WHERE id = ?1", [call_id.clone()]).await;
-                } else if req.action_id == "call.switch_audio" {
-                    kind = "audio".to_string();
-                    let _ = db.execute("UPDATE call_sessions SET kind = 'audio' WHERE id = ?1", [call_id.clone()]).await;
-                }
-
-                let is_video = kind == "video";
-                let schema = if is_video {
-                    crate::sdui::build_active_video_call_screen(
-                        "Peer", 
-                        false, // default to false since stateless
-                        true, // default to true to allow toggling off
-                        &call_id, 
-                        2
-                    )
-                } else {
-                    crate::sdui::build_active_audio_call_screen(
-                        "Peer", 
-                        false,
-                        &call_id, 
-                        2
-                    )
-                };
-
+                let schema = crate::sdui::build_active_audio_call_screen(
+                    "Peer", 
+                    false,
+                    &call_id, 
+                    2
+                );
                 let msg = WsMessage {
                     msg_type: WsMessageType::CallAccepted, // Re-use CallAccepted as UI update for calls
                     request_id: Uuid::new_v4().to_string(),

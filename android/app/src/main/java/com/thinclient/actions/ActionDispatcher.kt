@@ -25,15 +25,11 @@ class ActionDispatcher(
     private val allowlist = setOf(
         "navigate",
         "call.start_audio",
-        "call.start_video",
         "call.accept",
         "call.reject",
         // "call.end" is handled directly in MainActivity before reaching ActionDispatcher
         "call.mute",
         "call.unmute",
-        "call.camera_on",
-        "call.camera_off",
-        "call.camera_switch",
         "retry",
         "logout",
         "copy_text"
@@ -56,12 +52,12 @@ class ActionDispatcher(
                     Log.i("ActionDispatcher", "Copied to clipboard: ${it.hashCode()}") // Redacted log
                 }
             }
-            "call.start_audio", "call.start_video" -> {
+            "call.start_audio" -> {
                 if (data.isNullOrBlank()) {
                     showError("Target UID cannot be empty")
                     return
                 }
-                val kind = if (action == "call.start_audio") "audio" else "video"
+                val kind = "audio"
                 Log.i("ActionDispatcher", "Initiating $kind call to target hash: ${data.hashCode()}")
                 
                 // Show INITIATING state
@@ -114,7 +110,7 @@ class ActionDispatcher(
                     }
                 })
             }
-            "call.accept", "call.reject", "call.end", "call.mute", "call.unmute", "call.camera_on", "call.camera_off", "call.camera_switch" -> {
+            "call.accept", "call.reject", "call.end", "call.mute", "call.unmute" -> {
                 val callId = data
                 if (callId.isNullOrBlank()) {
                     showError("Call ID missing")

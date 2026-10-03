@@ -17,9 +17,7 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
     fun render(schema: SduiSchema): View {
         inputViews.clear()
 
-        if (schema.screen == "active_video_call") {
-            return buildActiveVideoCallLayout(schema)
-        }
+
 
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -133,146 +131,7 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
                     }
                 })
             }
-            "local_video" -> {
-                val container = android.widget.FrameLayout(context)
-                container.layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    600
-                ).apply {
-                    setMargins(0, 20, 0, 20)
-                }
-                
-                val renderer = org.webrtc.SurfaceViewRenderer(context)
-                renderer.tag = "local_video_renderer"
-                renderer.layoutParams = android.widget.FrameLayout.LayoutParams(
-                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-                )
-                
-                container.addView(renderer)
-                container
-            }
-            "remote_video" -> {
-                val container = android.widget.FrameLayout(context)
-                container.layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    600
-                ).apply {
-                    setMargins(0, 20, 0, 20)
-                }
-                container.setBackgroundColor(android.graphics.Color.DKGRAY)
-                
-                val renderer = org.webrtc.SurfaceViewRenderer(context)
-                renderer.tag = "remote_video_renderer"
-                renderer.layoutParams = android.widget.FrameLayout.LayoutParams(
-                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-                )
-                
-                container.addView(renderer)
-                container
-            }
             else -> null
         }
-    }
-
-    private fun buildActiveVideoCallLayout(schema: SduiSchema): View {
-        val root = android.widget.FrameLayout(context)
-        root.layoutParams = android.widget.FrameLayout.LayoutParams(
-            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-            android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-        )
-        root.setBackgroundColor(Color.BLACK)
-
-        // Find components from schema safely
-        val componentsList = schema.components ?: emptyList()
-        val remoteVideoComp = componentsList.find { it.id == "remote_video" }
-        val localVideoComp = componentsList.find { it.id == "local_video" }
-        
-        // Remote Video Fullscreen
-        if (remoteVideoComp != null) {
-            val remoteRenderer = org.webrtc.SurfaceViewRenderer(context)
-            remoteRenderer.tag = "remote_video_renderer"
-            remoteRenderer.layoutParams = android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            root.addView(remoteRenderer)
-        }
-
-        // Local Video PiP removed as per user request ("2jon camra viaw hoba na... full seen")
-
-        // Top info (Peer Name + Timer)
-        val infoContainer = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = android.view.Gravity.CENTER_HORIZONTAL
-            layoutParams = android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL
-                setMargins(0, (50 * context.resources.displayMetrics.density).toInt(), 0, 0)
-            }
-        }
-        
-        val peerComp = componentsList.find { it.id == "peer_name" }
-        val timerComp = componentsList.find { it.id == "call_timer" }
-        
-        if (peerComp != null) {
-            val pView = buildComponent(peerComp) as? TextView
-            pView?.setTextColor(Color.WHITE)
-            pView?.setShadowLayer(4f, 0f, 2f, Color.BLACK)
-            pView?.textSize = 24f
-            pView?.let { infoContainer.addView(it) }
-        }
-        if (timerComp != null) {
-            val tView = buildComponent(timerComp) as? TextView
-            tView?.setTextColor(Color.WHITE)
-            tView?.setShadowLayer(4f, 0f, 2f, Color.BLACK)
-            tView?.let { infoContainer.addView(it) }
-        }
-        val visualizerComp = componentsList.find { it.type == "audio_visualizer" }
-        if (visualizerComp != null) {
-            val vView = buildComponent(visualizerComp)
-            vView?.let { infoContainer.addView(it) }
-        }
-        
-        root.addView(infoContainer)
-
-        // Buttons Container at Bottom
-        val buttonsContainer = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER
-            layoutParams = android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                gravity = android.view.Gravity.BOTTOM
-                setMargins(0, 0, 0, (60 * context.resources.displayMetrics.density).toInt())
-            }
-        }
-
-        val buttonIds = listOf("camera_switch", "camera_toggle", "mute_toggle", "switch_audio", "end_call")
-        for (btnId in buttonIds) {
-            val btnComp = componentsList.find { it.id == btnId }
-            if (btnComp != null) {
-                val btnView = buildComponent(btnComp)
-                if (btnView != null) {
-                    val lp = LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1f
-                    ).apply {
-                        setMargins(8, 0, 8, 0)
-                    }
-                    btnView.layoutParams = lp
-                    buttonsContainer.addView(btnView)
-                }
-            }
-        }
-        
-        root.addView(buttonsContainer)
-
-        return root
     }
 }
