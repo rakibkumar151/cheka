@@ -16,7 +16,8 @@ class ActionDispatcher(
     private val context: Context,
     private val baseUrl: String,
     private val jwtToken: String,
-    private val onUiUpdate: (SduiSchema) -> Unit
+    private val onUiUpdate: (SduiSchema) -> Unit,
+    private val onActiveCallChanged: ((String) -> Unit)? = null
 ) {
     private val client = OkHttpClient()
     private val gson = Gson()
@@ -98,6 +99,9 @@ class ActionDispatcher(
                                     val callId = map["call_id"] as? String
                                     val state = map["state"] as? String
                                     Log.i("ActionDispatcher", "Call created: $callId, state: $state")
+                                    if (callId != null) {
+                                        onActiveCallChanged?.invoke(callId)
+                                    }
                                     showCallState(state ?: "RINGING")
                                 } catch (e: Exception) {
                                     Log.e("ActionDispatcher", "Failed to parse JSON response", e)

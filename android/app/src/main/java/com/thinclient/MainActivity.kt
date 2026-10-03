@@ -26,6 +26,7 @@ class MainActivity : AppCompatActivity() {
     private val wsUrl = "wss://cheka.onrender.com/v1/ws"
     private var jwtToken: String = ""
     private var myUid: String = ""
+    private var activeCallId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,7 +49,15 @@ class MainActivity : AppCompatActivity() {
     // ─── Central call teardown ─────────────────────────────────────────────────
     // Call this from ANYWHERE: End Call button, ICE failed, call_end msg, crash
     private fun endCallAndGoHome(callId: String? = null) {
-        Log.i("MainActivity", "endCallAndGoHome callId=$callId")
+        Log.i("MainActivity", "endCallAndGoHome callId=$callId activeCallId=$activeCallId")
+
+        // If this teardown is for a specific call, but we have moved on to a NEW call, ignore it!
+        if (callId != null && activeCallId != null && callId != activeCallId) {
+            Log.i("MainActivity", "Ignoring teardown for $callId because active call is $activeCallId")
+            return
+        }
+
+        activeCallId = null
 
         // 1. Close WebRTC — safe to call even if already closed
         val wc = webRTCClient
@@ -146,7 +155,8 @@ class MainActivity : AppCompatActivity() {
                 view?.updateStats(0, 0, 0, 0)
 
                 // Auto-navigate home on any terminal failure
-                if (state == "FAILED" && webRTCClient != null) {
+                // Crucial: Only trigger if THIS WebRTCClient is still the active one
+                if (state == "FAILED" && webRTCClient === wc) {
                     Log.i("MainActivity", "[$callId] ICE/Connection FAILED → auto going home")
                     endCallAndGoHome(callId)
                 }
@@ -157,12 +167,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initializeServices(token: String) {
-        actionDispatcher = ActionDispatcher(this, baseUrl, token) { schema ->
+        actionDispatcher = ActionDispatcher(this, baseUrl, token, { schema ->
             runOnUiThread {
                 val view = sduiRenderer.render(schema)
                 setContentView(view)
             }
-        }
+        }, { newCallId ->
+            runOnUiThread { activeCallId = newCallId }
+        })
 
         sduiRenderer = SduiRenderer(this) { action, data ->
             when (action) {
@@ -183,6 +195,17 @@ class MainActivity : AppCompatActivity() {
                 val message = gson.fromJson(text, JsonObject::class.java)
                 val msgType = message.get("type")?.asString
                 val callId  = message.get("call_id")?.asString
+
+                // Filter out late messages from old calls
+                if (callId != null && activeCallId != null && callId != activeCallId) {
+                    Log.w("MainActivity", "Ignoring late message $msgType for dead call $callId (active: $activeCallId)")
+                    return@SignalingClient
+                }
+                
+                // Track new incoming calls
+                if (callId != null && (msgType == "call_incoming" || msgType == "call_accepted")) {
+                    activeCallId = callId
+                }
 
                 when {
                     msgType == "call_accepted" && callId != null -> {
