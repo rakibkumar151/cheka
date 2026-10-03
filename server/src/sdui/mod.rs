@@ -47,6 +47,8 @@ pub enum SduiActionId {
     CallCameraOff,
     #[serde(rename = "call.camera_switch")]
     CallCameraSwitch,
+    #[serde(rename = "call.switch_audio")]
+    CallSwitchAudio,
     Retry,
     Logout,
     #[serde(rename = "copy_text")]
@@ -442,6 +444,15 @@ pub fn build_active_video_call_screen(
                 children: vec![],
             },
             SduiComponent {
+                id: "audio_visualizer".to_string(),
+                component_type: SduiComponentType::AudioVisualizer,
+                text: None,
+                data: None,
+                action: None,
+                style: None,
+                children: vec![],
+            },
+            SduiComponent {
                 id: "mute_toggle".to_string(),
                 component_type: SduiComponentType::IconButton,
                 action: Some(if is_muted {
@@ -479,7 +490,7 @@ pub fn build_active_video_call_screen(
             SduiComponent {
                 id: "switch_audio".to_string(),
                 component_type: SduiComponentType::IconButton,
-                action: Some(SduiActionId::CallCameraOff),
+                action: Some(SduiActionId::CallSwitchAudio),
                 text: Some("Switch to Audio".to_string()),
                 data: Some(call_id.to_string()),
                 style: None,

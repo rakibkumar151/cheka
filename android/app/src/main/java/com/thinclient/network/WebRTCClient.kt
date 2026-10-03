@@ -261,7 +261,15 @@ class WebRTCClient(
     }
 
     fun toggleVideo(enable: Boolean) {
-        localVideoTrack?.setEnabled(enable)
+        if (enable && localVideoTrack == null) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                Log.e("WebRTCClient", "[$callId] CAMERA denied — video track NOT created")
+                return
+            }
+            createVideoTrack()
+        } else {
+            localVideoTrack?.setEnabled(enable)
+        }
         Log.i("WebRTCClient", "[$callId] Local video track enabled: $enable")
     }
 
@@ -419,13 +427,11 @@ class WebRTCClient(
         )
         peerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, init)
         
-        if (isVideoCall) {
-            val videoInit = RtpTransceiver.RtpTransceiverInit(
-                RtpTransceiver.RtpTransceiverDirection.SEND_RECV,
-                listOf("stream0")
-            )
-            peerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, videoInit)
-        }
+        val videoInit = RtpTransceiver.RtpTransceiverInit(
+            RtpTransceiver.RtpTransceiverDirection.SEND_RECV,
+            listOf("stream0")
+        )
+        peerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, videoInit)
 
         Log.i("WebRTCClient", "[$callId] PeerConnection created, ICE servers: ${iceServers.size}")
     }
@@ -505,9 +511,7 @@ class WebRTCClient(
         onConnectionStateChange?.invoke("NEGOTIATING")
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-            if (isVideoCall) {
-                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
-            }
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
         }
         peerConnection?.createOffer(object : SdpObserver {
             override fun onCreateSuccess(sdp: SessionDescription?) {
@@ -559,9 +563,7 @@ class WebRTCClient(
                 }
                 val constraints = MediaConstraints().apply {
                     mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-                    if (isVideoCall) {
-                        mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
-                    }
+                    mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
                 }
                 peerConnection?.createAnswer(object : SdpObserver {
                     override fun onCreateSuccess(answerSdp: SessionDescription?) {

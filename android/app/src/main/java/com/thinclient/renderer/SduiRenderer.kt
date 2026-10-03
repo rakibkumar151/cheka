@@ -250,6 +250,11 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
             tView?.setShadowLayer(4f, 0f, 2f, Color.BLACK)
             tView?.let { infoContainer.addView(it) }
         }
+        val visualizerComp = schema.components.find { it.type == "audio_visualizer" }
+        if (visualizerComp != null) {
+            val vView = buildComponent(visualizerComp)
+            vView?.let { infoContainer.addView(it) }
+        }
         
         root.addView(infoContainer)
 
