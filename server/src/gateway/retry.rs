@@ -1,7 +1,5 @@
 use super::ack::AckManager;
-use super::protocol::GatewayFrame;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 
 pub async fn retry_task(ack_manager: Arc<AckManager>) {

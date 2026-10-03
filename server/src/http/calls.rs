@@ -199,7 +199,7 @@ pub async fn handle_action(
     claims: Claims,
     axum::extract::Path(call_id): axum::extract::Path<String>,
     State(state): State<Arc<AppState>>,
-    axum::Json(req): axum::Json<CallActionReq>,
+    axum::Json(_req): axum::Json<CallActionReq>,
 ) -> impl IntoResponse {
     let db = match state.db.connect() {
         Ok(c) => c,
@@ -212,12 +212,6 @@ pub async fn handle_action(
     match db.query("SELECT role FROM call_participants WHERE call_id = ?1 AND user_id = ?2", [call_id.clone(), claims.sub.clone()]).await {
         Ok(mut rows) => {
             if let Ok(Some(_)) = rows.next().await {
-                let mut kind = "audio".to_string();
-                if let Ok(mut kind_rows) = db.query("SELECT kind FROM call_sessions WHERE id = ?1", [call_id.clone()]).await {
-                    if let Ok(Some(row)) = kind_rows.next().await {
-                        kind = row.get(0).unwrap_or_else(|_| "audio".to_string());
-                    }
-                }
 
                 let schema = crate::sdui::build_active_audio_call_screen(
                     "Peer", 

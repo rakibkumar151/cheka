@@ -121,7 +121,7 @@ pub fn build_home_screen(my_uid: &str, online_users: &[(String, UserPresence)], 
             action: None, style: None, data: None, children: vec![],
         });
     } else {
-        for (uid, presence) in online_users {
+        for (uid, _presence) in online_users {
             // Add a row for each user
             components.push(SduiComponent {
                 id: format!("row_{}", uid),
@@ -286,15 +286,7 @@ pub fn build_active_audio_call_screen(
                 style: None,
                 children: vec![],
             },
-            SduiComponent {
-                id: "switch_video".to_string(),
-                component_type: SduiComponentType::IconButton,
-                action: Some(SduiActionId::CallCameraOn),
-                text: Some("Switch to Video".to_string()),
-                data: Some(call_id.to_string()),
-                style: None,
-                children: vec![],
-            },
+
             SduiComponent {
                 id: "end_call".to_string(),
                 component_type: SduiComponentType::IconButton,
@@ -373,120 +365,7 @@ pub fn build_connecting_screen(revision: u32) -> SduiSchema {
     }
 }
 
-pub fn build_active_video_call_screen(
-    peer_name: &str,
-    is_muted: bool,
-    camera_on: bool,
-    call_id: &str,
-    revision: u32,
-) -> SduiSchema {
-    SduiSchema {
-        schema_version: 1,
-        screen: "active_video_call".to_string(),
-        revision,
-        title: Some("Active Video Call".to_string()),
-        components: vec![
-            SduiComponent {
-                id: "remote_video".to_string(),
-                component_type: SduiComponentType::RemoteVideo,
-                text: None,
-                data: None,
-                action: None,
-                style: None,
-                children: vec![],
-            },
-            SduiComponent {
-                id: "local_video".to_string(),
-                component_type: SduiComponentType::LocalVideo,
-                text: None,
-                data: None,
-                action: None,
-                style: None,
-                children: vec![],
-            },
-            SduiComponent {
-                id: "peer_name".to_string(),
-                component_type: SduiComponentType::Text,
-                text: Some(peer_name.to_string()),
-                data: None,
-                action: None,
-                style: None,
-                children: vec![],
-            },
-            SduiComponent {
-                id: "call_timer".to_string(),
-                component_type: SduiComponentType::CallTimer,
-                text: None,
-                data: None,
-                action: None,
-                style: None,
-                children: vec![],
-            },
-            SduiComponent {
-                id: "audio_visualizer".to_string(),
-                component_type: SduiComponentType::AudioVisualizer,
-                text: None,
-                data: None,
-                action: None,
-                style: None,
-                children: vec![],
-            },
-            SduiComponent {
-                id: "mute_toggle".to_string(),
-                component_type: SduiComponentType::IconButton,
-                action: Some(if is_muted {
-                    SduiActionId::CallUnmute
-                } else {
-                    SduiActionId::CallMute
-                }),
-                text: Some(if is_muted { "Unmute".to_string() } else { "Mute".to_string() }),
-                data: Some(call_id.to_string()),
-                style: None,
-                children: vec![],
-            },
-            SduiComponent {
-                id: "camera_toggle".to_string(),
-                component_type: SduiComponentType::IconButton,
-                action: Some(if camera_on {
-                    SduiActionId::CallCameraOff
-                } else {
-                    SduiActionId::CallCameraOn
-                }),
-                text: Some(if camera_on { "Turn Camera Off".to_string() } else { "Turn Camera On".to_string() }),
-                data: Some(call_id.to_string()),
-                style: None,
-                children: vec![],
-            },
-            SduiComponent {
-                id: "camera_switch".to_string(),
-                component_type: SduiComponentType::IconButton,
-                action: Some(SduiActionId::CallCameraSwitch),
-                text: Some("Flip Camera".to_string()),
-                data: Some(call_id.to_string()),
-                style: None,
-                children: vec![],
-            },
-            SduiComponent {
-                id: "switch_audio".to_string(),
-                component_type: SduiComponentType::IconButton,
-                action: Some(SduiActionId::CallSwitchAudio),
-                text: Some("Switch to Audio".to_string()),
-                data: Some(call_id.to_string()),
-                style: None,
-                children: vec![],
-            },
-            SduiComponent {
-                id: "end_call".to_string(),
-                component_type: SduiComponentType::IconButton,
-                action: Some(SduiActionId::CallEnd),
-                text: Some("End Call".to_string()),
-                data: None,
-                style: Some("destructive".to_string()),
-                children: vec![],
-            },
-        ],
-    }
-}
+
 
 pub fn build_call_ended_screen(revision: u32) -> SduiSchema {
     SduiSchema {
