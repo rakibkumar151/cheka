@@ -132,53 +132,22 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
                 val container = android.widget.FrameLayout(context)
                 container.layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
-                    600 // Fixed height for video preview
+                    600
                 ).apply {
                     setMargins(0, 20, 0, 20)
                 }
                 
-                val surfaceView = android.view.SurfaceView(context)
-                surfaceView.layoutParams = android.widget.FrameLayout.LayoutParams(
+                val renderer = org.webrtc.SurfaceViewRenderer(context)
+                renderer.tag = "local_video_renderer"
+                renderer.layoutParams = android.widget.FrameLayout.LayoutParams(
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT
                 )
                 
-                surfaceView.holder.addCallback(object : android.view.SurfaceHolder.Callback {
-                    var camera: android.hardware.Camera? = null
-                    override fun surfaceCreated(holder: android.view.SurfaceHolder) {
-                        try {
-                            // Try to open front camera
-                            var frontCamId = 0
-                            val info = android.hardware.Camera.CameraInfo()
-                            for (i in 0 until android.hardware.Camera.getNumberOfCameras()) {
-                                android.hardware.Camera.getCameraInfo(i, info)
-                                if (info.facing == android.hardware.Camera.CameraInfo.CAMERA_FACING_FRONT) {
-                                    frontCamId = i
-                                    break
-                                }
-                            }
-                            camera = android.hardware.Camera.open(frontCamId)
-                            camera?.setPreviewDisplay(holder)
-                            camera?.setDisplayOrientation(90) // Portrait orientation
-                            camera?.startPreview()
-                        } catch(e: Exception) {
-                            android.util.Log.e("SduiRenderer", "Camera failed", e)
-                        }
-                    }
-                    override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, w: Int, h: Int) {}
-                    override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
-                        try {
-                            camera?.stopPreview()
-                            camera?.release()
-                        } catch(e: Exception) {}
-                    }
-                })
-                
-                container.addView(surfaceView)
+                container.addView(renderer)
                 container
             }
             "remote_video" -> {
-                // Mock remote video since we don't have WebRTC streams connected yet
                 val container = android.widget.FrameLayout(context)
                 container.layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -188,17 +157,14 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
                 }
                 container.setBackgroundColor(android.graphics.Color.DKGRAY)
                 
-                val text = android.widget.TextView(context)
-                text.text = "Waiting for remote video..."
-                text.setTextColor(android.graphics.Color.WHITE)
-                text.layoutParams = android.widget.FrameLayout.LayoutParams(
-                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    gravity = android.view.Gravity.CENTER
-                }
+                val renderer = org.webrtc.SurfaceViewRenderer(context)
+                renderer.tag = "remote_video_renderer"
+                renderer.layoutParams = android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                )
                 
-                container.addView(text)
+                container.addView(renderer)
                 container
             }
             else -> null

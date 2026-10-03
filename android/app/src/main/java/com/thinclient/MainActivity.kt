@@ -149,9 +149,9 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun createWebRTCClient(callId: String): com.thinclient.network.WebRTCClient {
+    private fun createWebRTCClient(callId: String, isVideoCall: Boolean): com.thinclient.network.WebRTCClient {
         val wc = com.thinclient.network.WebRTCClient(
-            this, signalingClient!!, callId, jwtToken, baseUrl
+            this, signalingClient!!, callId, jwtToken, baseUrl, isVideoCall
         )
         wc.onConnectionStateChange = { state ->
             Log.i("MainActivity", "[$callId] WebRTC state → $state")
@@ -180,6 +180,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 val view = sduiRenderer.render(schema)
                 setContentView(view)
+                webRTCClient?.attachVideoRenderers()
             }
         }, { newCallId ->
             runOnUiThread { activeCallId = newCallId }
@@ -223,18 +224,23 @@ class MainActivity : AppCompatActivity() {
 
                 when {
                     msgType == "call_accepted" && callId != null -> {
+                        val payload = message.get("payload")
+                        var schema: SduiSchema? = null
+                        if (payload != null && !payload.isJsonNull) {
+                            schema = gson.fromJson(payload, SduiSchema::class.java)
+                        }
                         runOnUiThread {
                             if (webRTCClient == null) {
-                                webRTCClient = createWebRTCClient(callId)
+                                val isVideo = schema?.components?.any { it.type == "local_video" || it.type == "remote_video" } ?: false
+                                webRTCClient = createWebRTCClient(callId, isVideo)
                                 webRTCClient?.startCall()
                             }
                         }
-                        val payload = message.get("payload")
-                        if (payload != null && !payload.isJsonNull) {
-                            val schema = gson.fromJson(payload, SduiSchema::class.java)
+                        if (schema != null) {
                             runOnUiThread {
                                 val view = sduiRenderer.render(schema)
                                 setContentView(view)
+                                webRTCClient?.attachVideoRenderers()
                             }
                         }
                     }
@@ -246,6 +252,7 @@ class MainActivity : AppCompatActivity() {
                             runOnUiThread {
                                 val view = sduiRenderer.render(schema)
                                 setContentView(view)
+                                webRTCClient?.attachVideoRenderers()
                             }
                         }
                     }
@@ -261,7 +268,12 @@ class MainActivity : AppCompatActivity() {
                         val sdp = payload.get("sdp").asString
                         runOnUiThread {
                             if (webRTCClient == null) {
-                                webRTCClient = createWebRTCClient(callId)
+                                // For callee, the active call screen (and its schema) might already be rendered
+                                // Let's try to detect if it's a video call by checking if we have a video renderer in the view tree
+                                val root = findViewById<android.view.View>(android.R.id.content)
+                                val isVideo = root?.findViewWithTag<android.view.View>("local_video_renderer") != null ||
+                                              root?.findViewWithTag<android.view.View>("remote_video_renderer") != null
+                                webRTCClient = createWebRTCClient(callId, isVideo)
                             }
                             webRTCClient?.handleOffer(sdp)
                         }

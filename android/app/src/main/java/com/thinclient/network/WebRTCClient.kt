@@ -11,12 +11,21 @@ class WebRTCClient(
     private val signalingClient: SignalingClient,
     private val callId: String,
     private val jwtToken: String,
-    private val baseUrl: String
+    private val baseUrl: String,
+    private val isVideoCall: Boolean = false
 ) {
     // Instance-level resources (per-call)
     private var peerConnection: PeerConnection? = null
     private var localAudioTrack: AudioTrack? = null
     private var audioSource: AudioSource? = null
+    
+    private var localVideoTrack: VideoTrack? = null
+    private var remoteVideoTrack: VideoTrack? = null
+    private var videoCapturer: VideoCapturer? = null
+    private var surfaceTextureHelper: SurfaceTextureHelper? = null
+    
+    private var currentLocalRenderer: SurfaceViewRenderer? = null
+    private var currentRemoteRenderer: SurfaceViewRenderer? = null
 
     // Debug stats
     @Volatile var iceConnectionState = "NEW"
@@ -90,12 +99,12 @@ class WebRTCClient(
         // so previous call's audio hardware has time to fully release
         Thread {
             Thread.sleep(150) // brief pause for audio HW to release between calls
-            checkPermissionAndCreateAudioTrack()
+            checkPermissionAndCreateMediaTracks()
         }.apply { isDaemon = true; start() }
     }
 
 
-    private fun checkPermissionAndCreateAudioTrack() {
+    private fun checkPermissionAndCreateMediaTracks() {
         val granted = androidx.core.content.ContextCompat.checkSelfPermission(
             context, android.Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -157,9 +166,97 @@ class WebRTCClient(
                 }
                 Log.i("WebRTCClient", "[$callId] Audio track added. Sender present: $senderPresent")
             }
+            
+            if (isVideoCall) {
+                if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    Log.e("WebRTCClient", "[$callId] CAMERA denied — video track NOT created")
+                } else {
+                    createVideoTrack()
+                }
+            }
         } catch (e: Exception) {
-            Log.e("WebRTCClient", "[$callId] Failed to create audio track", e)
+            Log.e("WebRTCClient", "[$callId] Failed to create tracks", e)
             localTrackCreated = false
+        }
+    }
+
+    private fun createVideoTrack() {
+        try {
+            val enumerator = org.webrtc.Camera2Enumerator(context)
+            val deviceNames = enumerator.deviceNames
+            var capturer: org.webrtc.VideoCapturer? = null
+            for (deviceName in deviceNames) {
+                if (enumerator.isFrontFacing(deviceName)) {
+                    capturer = enumerator.createCapturer(deviceName, null)
+                    break
+                }
+            }
+            if (capturer == null) {
+                for (deviceName in deviceNames) {
+                    if (!enumerator.isFrontFacing(deviceName)) {
+                        capturer = enumerator.createCapturer(deviceName, null)
+                        break
+                    }
+                }
+            }
+
+            if (capturer != null) {
+                videoCapturer = capturer
+                surfaceTextureHelper = org.webrtc.SurfaceTextureHelper.create("CaptureThread", sharedEglBase.eglBaseContext)
+                val videoSource = sharedFactory?.createVideoSource(capturer.isScreencast)
+                capturer.initialize(surfaceTextureHelper, context, videoSource?.capturerObserver)
+                capturer.startCapture(1280, 720, 30)
+
+                localVideoTrack = sharedFactory?.createVideoTrack("video0", videoSource)
+
+                val transceivers = peerConnection?.transceivers
+                var trackAttached = false
+                if (transceivers != null) {
+                    for (t in transceivers) {
+                        if (t.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO) {
+                            t.sender.setTrack(localVideoTrack, false)
+                            trackAttached = true
+                            break
+                        }
+                    }
+                }
+                if (!trackAttached) {
+                    peerConnection?.addTrack(localVideoTrack, listOf("stream0"))
+                }
+                Log.i("WebRTCClient", "[$callId] Local video track created and attached")
+
+                (context as? android.app.Activity)?.runOnUiThread {
+                    attachVideoRenderers()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("WebRTCClient", "[$callId] createVideoTrack failed", e)
+        }
+    }
+
+    fun attachVideoRenderers() {
+        val root = (context as? android.app.Activity)?.findViewById<android.view.View>(android.R.id.content)
+        val localRenderer = root?.findViewWithTag<org.webrtc.SurfaceViewRenderer>("local_video_renderer")
+        val remoteRenderer = root?.findViewWithTag<org.webrtc.SurfaceViewRenderer>("remote_video_renderer")
+
+        if (localRenderer != null && localRenderer != currentLocalRenderer) {
+            currentLocalRenderer?.let { localVideoTrack?.removeSink(it) }
+            try { localRenderer.init(sharedEglBase.eglBaseContext, null) } catch (e: Exception) {}
+            localRenderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+            localRenderer.setEnableHardwareScaler(true)
+            localVideoTrack?.addSink(localRenderer)
+            currentLocalRenderer = localRenderer
+            Log.i("WebRTCClient", "[$callId] Attached local video renderer")
+        }
+
+        if (remoteRenderer != null && remoteRenderer != currentRemoteRenderer) {
+            currentRemoteRenderer?.let { remoteVideoTrack?.removeSink(it) }
+            try { remoteRenderer.init(sharedEglBase.eglBaseContext, null) } catch (e: Exception) {}
+            remoteRenderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+            remoteRenderer.setEnableHardwareScaler(true)
+            remoteVideoTrack?.addSink(remoteRenderer)
+            currentRemoteRenderer = remoteRenderer
+            Log.i("WebRTCClient", "[$callId] Attached remote video renderer")
         }
     }
 
@@ -257,22 +354,36 @@ class WebRTCClient(
             override fun onRenegotiationNeeded() {}
 
             override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
-                val track = receiver?.track()
-                if (track is AudioTrack) {
-                    remoteTrackReceived = true
-                    track.setEnabled(true)
-                    Log.i("WebRTCClient", "[$callId] Remote AudioTrack received and enabled")
+            val track = receiver?.track()
+            if (track is AudioTrack) {
+                remoteTrackReceived = true
+                track.setEnabled(true)
+                Log.i("WebRTCClient", "[$callId] Remote AudioTrack received and enabled")
+            } else if (track is VideoTrack) {
+                remoteVideoTrack = track
+                track.setEnabled(true)
+                Log.i("WebRTCClient", "[$callId] Remote VideoTrack received and enabled")
+                (context as? android.app.Activity)?.runOnUiThread {
+                    attachVideoRenderers()
                 }
             }
+        }
 
-            override fun onTrack(transceiver: RtpTransceiver?) {
-                val track = transceiver?.receiver?.track()
-                if (track is AudioTrack) {
-                    remoteTrackReceived = true
-                    track.setEnabled(true)
-                    Log.i("WebRTCClient", "[$callId] Remote AudioTrack via onTrack, enabled")
+        override fun onTrack(transceiver: RtpTransceiver?) {
+            val track = transceiver?.receiver?.track()
+            if (track is AudioTrack) {
+                remoteTrackReceived = true
+                track.setEnabled(true)
+                Log.i("WebRTCClient", "[$callId] Remote AudioTrack via onTrack, enabled")
+            } else if (track is VideoTrack) {
+                remoteVideoTrack = track
+                track.setEnabled(true)
+                Log.i("WebRTCClient", "[$callId] Remote VideoTrack via onTrack, enabled")
+                (context as? android.app.Activity)?.runOnUiThread {
+                    attachVideoRenderers()
                 }
             }
+        }
         })
 
         // Force the SDP to include an audio transceiver, so we can negotiate it 
@@ -282,6 +393,14 @@ class WebRTCClient(
             listOf("stream0")
         )
         peerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, init)
+        
+        if (isVideoCall) {
+            val videoInit = RtpTransceiver.RtpTransceiverInit(
+                RtpTransceiver.RtpTransceiverDirection.SEND_RECV,
+                listOf("stream0")
+            )
+            peerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, videoInit)
+        }
 
         Log.i("WebRTCClient", "[$callId] PeerConnection created, ICE servers: ${iceServers.size}")
     }
@@ -361,6 +480,9 @@ class WebRTCClient(
         onConnectionStateChange?.invoke("NEGOTIATING")
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+            if (isVideoCall) {
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+            }
         }
         peerConnection?.createOffer(object : SdpObserver {
             override fun onCreateSuccess(sdp: SessionDescription?) {
@@ -412,6 +534,9 @@ class WebRTCClient(
                 }
                 val constraints = MediaConstraints().apply {
                     mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+                    if (isVideoCall) {
+                        mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+                    }
                 }
                 peerConnection?.createAnswer(object : SdpObserver {
                     override fun onCreateSuccess(answerSdp: SessionDescription?) {
@@ -561,6 +686,15 @@ class WebRTCClient(
         // Disposing them was the root cause of 3rd/5th call failures.
         localAudioTrack?.dispose()
         audioSource?.dispose()
+        
+        localVideoTrack?.dispose()
+        try { videoCapturer?.stopCapture() } catch (e: Exception) {}
+        videoCapturer?.dispose()
+        surfaceTextureHelper?.dispose()
+        
+        currentLocalRenderer?.release()
+        currentRemoteRenderer?.release()
+        
         peerConnection?.dispose()   // dispose() fully releases ICE/DTLS state
         Log.i("WebRTCClient", "[$callId] Closed (factory kept alive for next call)")
     }
