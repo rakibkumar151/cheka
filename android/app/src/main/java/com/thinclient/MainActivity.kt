@@ -28,6 +28,10 @@ class MainActivity : AppCompatActivity() {
     private var myUid: String = ""
     private var activeCallId: String? = null
     private val deadCallIds = mutableSetOf<String>()
+    
+    // Local state for UI consistency
+    private var isCameraOn = false
+    private var isMuted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,8 +53,27 @@ class MainActivity : AppCompatActivity() {
 
     // ─── Central call teardown ─────────────────────────────────────────────────
     // Call this from ANYWHERE: End Call button, ICE failed, call_end msg, crash
+    private fun patchSchema(schema: com.thinclient.model.SduiSchema): com.thinclient.model.SduiSchema {
+        val patchedComponents = schema.components.map { comp ->
+            when (comp.action) {
+                "call.camera_off", "call.camera_on" -> comp.copy(
+                    action = if (isCameraOn) "call.camera_off" else "call.camera_on",
+                    text = if (isCameraOn) "Turn Camera Off" else "Turn Camera On"
+                )
+                "call.mute", "call.unmute" -> comp.copy(
+                    action = if (isMuted) "call.unmute" else "call.mute",
+                    text = if (isMuted) "Unmute" else "Mute"
+                )
+                else -> comp
+            }
+        }
+        return schema.copy(components = patchedComponents)
+    }
+
     private fun endCallAndGoHome(callId: String? = null) {
         Log.i("MainActivity", "endCallAndGoHome callId=$callId activeCallId=$activeCallId")
+        isCameraOn = false
+        isMuted = false
 
         if (callId != null) {
             if (deadCallIds.contains(callId)) {
@@ -178,7 +201,7 @@ class MainActivity : AppCompatActivity() {
     private fun initializeServices(token: String) {
         actionDispatcher = ActionDispatcher(this, baseUrl, token, { schema ->
             runOnUiThread {
-                val view = sduiRenderer.render(schema)
+                val view = sduiRenderer.render(patchSchema(schema))
                 setContentView(view)
                 webRTCClient?.attachVideoRenderers()
             }
@@ -188,10 +211,22 @@ class MainActivity : AppCompatActivity() {
 
         sduiRenderer = SduiRenderer(this) { action, data ->
             when (action) {
-                "call.mute"   -> webRTCClient?.setMuted(true)
-                "call.unmute" -> webRTCClient?.setMuted(false)
-                "call.camera_on" -> webRTCClient?.toggleVideo(true)
-                "call.camera_off" -> webRTCClient?.toggleVideo(false)
+                "call.mute"   -> {
+                    isMuted = true
+                    webRTCClient?.setMuted(true)
+                }
+                "call.unmute" -> {
+                    isMuted = false
+                    webRTCClient?.setMuted(false)
+                }
+                "call.camera_on" -> {
+                    isCameraOn = true
+                    webRTCClient?.toggleVideo(true)
+                }
+                "call.camera_off" -> {
+                    isCameraOn = false
+                    webRTCClient?.toggleVideo(false)
+                }
                 "call.camera_switch" -> webRTCClient?.switchCamera()
                 "call.end"    -> {
                     // End Call button pressed — close everything and go home
@@ -241,7 +276,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         if (schema != null) {
                             runOnUiThread {
-                                val view = sduiRenderer.render(schema)
+                                val view = sduiRenderer.render(patchSchema(schema))
                                 setContentView(view)
                                 webRTCClient?.attachVideoRenderers()
                             }
