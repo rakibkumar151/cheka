@@ -144,7 +144,7 @@ class WebRTCClient(
                 if (transceivers != null) {
                     for (t in transceivers) {
                         if (t.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO) {
-                            t.sender.setTrack(localAudioTrack, true)
+                            t.sender.setTrack(localAudioTrack, false)
                             trackAttached = true
                             senderPresent = true
                             break
