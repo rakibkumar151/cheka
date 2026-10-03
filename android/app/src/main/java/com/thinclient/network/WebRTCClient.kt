@@ -52,7 +52,6 @@ class WebRTCClient(
         // Disposing these between calls is the #1 cause of 3rd/5th call failures.
         @Volatile private var factoryInitialized = false
         @Volatile private var sharedFactory: PeerConnectionFactory? = null
-        private val sharedEglBase: EglBase by lazy { EglBase.create() }
         private val initLock = Any()
 
         fun ensureInitialized(context: Context) {
@@ -72,8 +71,6 @@ class WebRTCClient(
                 sharedFactory = PeerConnectionFactory.builder()
                     .setOptions(PeerConnectionFactory.Options())
                     .setAudioDeviceModule(adm)
-                    .setVideoEncoderFactory(DefaultVideoEncoderFactory(sharedEglBase.eglBaseContext, true, true))
-                    .setVideoDecoderFactory(DefaultVideoDecoderFactory(sharedEglBase.eglBaseContext))
                     .createPeerConnectionFactory()
 
                 adm.release() // ADM can be released after factory creation
@@ -87,6 +84,8 @@ class WebRTCClient(
         Log.i("WebRTCClient", "[$callId] Initializing WebRTCClient")
         ensureInitialized(context)   // no-op if already done
         createPeerConnection()
+        fetchTurnAndRestartIce() // Add TURN servers via API
+        
         // Run audio track creation on a background thread with retry
         // so previous call's audio hardware has time to fully release
         Thread {
@@ -171,7 +170,20 @@ class WebRTCClient(
         val iceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
-            PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer()
+            PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
+            // fallback public TURN immediately so it doesn't fail fast
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer()
         )
         buildPeerConnection(iceServers)
     }
