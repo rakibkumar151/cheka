@@ -27,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     private var jwtToken: String = ""
     private var myUid: String = ""
     private var activeCallId: String? = null
+    private val deadCallIds = mutableSetOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +51,14 @@ class MainActivity : AppCompatActivity() {
     // Call this from ANYWHERE: End Call button, ICE failed, call_end msg, crash
     private fun endCallAndGoHome(callId: String? = null) {
         Log.i("MainActivity", "endCallAndGoHome callId=$callId activeCallId=$activeCallId")
+
+        if (callId != null) {
+            if (deadCallIds.contains(callId)) {
+                Log.i("MainActivity", "Call $callId is already dead, ignoring teardown.")
+                return
+            }
+            deadCallIds.add(callId)
+        }
 
         // If this teardown is for a specific call, but we have moved on to a NEW call, ignore it!
         if (callId != null && activeCallId != null && callId != activeCallId) {
@@ -195,6 +204,11 @@ class MainActivity : AppCompatActivity() {
                 val message = gson.fromJson(text, JsonObject::class.java)
                 val msgType = message.get("type")?.asString
                 val callId  = message.get("call_id")?.asString
+
+                if (callId != null && deadCallIds.contains(callId)) {
+                    Log.w("MainActivity", "Ignoring late message $msgType for already dead call $callId")
+                    return@SignalingClient
+                }
 
                 // Filter out late messages from old calls
                 if (callId != null && activeCallId != null && callId != activeCallId) {
