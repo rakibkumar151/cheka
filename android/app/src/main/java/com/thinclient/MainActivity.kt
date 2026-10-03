@@ -214,16 +214,9 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     // Both call_rejected and call_end → clean up and go home
+                    // IMPORTANT: Do NOT render any payload here — it would overwrite the My UID screen
                     msgType == "call_rejected" || msgType == "call_end" -> {
                         endCallAndGoHome(callId)
-                        val payload = message.get("payload")
-                        if (payload != null && !payload.isJsonNull) {
-                            val schema = gson.fromJson(payload, SduiSchema::class.java)
-                            runOnUiThread {
-                                val view = sduiRenderer.render(schema)
-                                setContentView(view)
-                            }
-                        }
                     }
 
                     msgType == "call_offer" && callId != null -> {
