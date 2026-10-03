@@ -84,7 +84,6 @@ class WebRTCClient(
         Log.i("WebRTCClient", "[$callId] Initializing WebRTCClient")
         ensureInitialized(context)   // no-op if already done
         createPeerConnection()
-        fetchTurnAndRestartIce() // Add TURN servers via API
         
         // Run audio track creation on a background thread with retry
         // so previous call's audio hardware has time to fully release
