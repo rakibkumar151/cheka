@@ -52,6 +52,7 @@ class WebRTCClient(
         // Disposing these between calls is the #1 cause of 3rd/5th call failures.
         @Volatile private var factoryInitialized = false
         @Volatile private var sharedFactory: PeerConnectionFactory? = null
+        @Volatile private var sharedAdm: org.webrtc.audio.AudioDeviceModule? = null // Retain ADM reference!
         private val initLock = Any()
 
         fun ensureInitialized(context: Context) {
@@ -67,13 +68,15 @@ class WebRTCClient(
                     .setUseHardwareAcousticEchoCanceler(true)
                     .setUseHardwareNoiseSuppressor(true)
                     .createAudioDeviceModule()
+                sharedAdm = adm
 
                 sharedFactory = PeerConnectionFactory.builder()
                     .setOptions(PeerConnectionFactory.Options())
                     .setAudioDeviceModule(adm)
                     .createPeerConnectionFactory()
 
-                adm.release() // ADM can be released after factory creation
+                // DO NOT call adm.release() here. The factory uses the native pointer,
+                // but if we release the Java wrapper, the native pointer may become dangling.
                 factoryInitialized = true
                 Log.i("WebRTCClient", "Shared PeerConnectionFactory created (once)")
             }

@@ -98,7 +98,7 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
                 val layout = LinearLayout(context).apply {
                     orientation = if (component.type == "row") LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
                 }
-                component.children.forEach { child ->
+                component.children?.forEach { child ->
                     buildComponent(child)?.let { layout.addView(it) }
                 }
                 layout
