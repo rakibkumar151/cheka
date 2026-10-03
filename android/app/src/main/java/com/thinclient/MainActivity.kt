@@ -35,6 +35,27 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // --- CRASH CATCHER ---
+        val prefs = getSharedPreferences("crash_prefs", android.content.Context.MODE_PRIVATE)
+        val crashLog = prefs.getString("last_crash", null)
+        if (crashLog != null) {
+            prefs.edit().remove("last_crash").apply()
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Crash Log (Screenshot this!)")
+                .setMessage(crashLog)
+                .setPositiveButton("OK", null)
+                .show()
+        }
+
+        Thread.setDefaultUncaughtExceptionHandler { _, exception ->
+            val sw = java.io.StringWriter()
+            exception.printStackTrace(java.io.PrintWriter(sw))
+            prefs.edit().putString("last_crash", sw.toString()).commit()
+            kotlin.system.exitProcess(1)
+        }
+        // ---------------------
+
         setContentView(android.widget.TextView(this).apply { text = "Authenticating..." })
 
         if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO)
