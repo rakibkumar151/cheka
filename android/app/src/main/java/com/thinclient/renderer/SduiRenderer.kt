@@ -36,7 +36,8 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
             root.addView(titleView)
         }
 
-        schema.components.forEach { component ->
+        val componentsList = schema.components ?: emptyList()
+        componentsList.forEach { component ->
             val view = buildComponent(component)
             if (view != null) {
                 root.addView(view)
@@ -183,9 +184,10 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
         )
         root.setBackgroundColor(Color.BLACK)
 
-        // Find components from schema
-        val remoteVideoComp = schema.components.find { it.id == "remote_video" }
-        val localVideoComp = schema.components.find { it.id == "local_video" }
+        // Find components from schema safely
+        val componentsList = schema.components ?: emptyList()
+        val remoteVideoComp = componentsList.find { it.id == "remote_video" }
+        val localVideoComp = componentsList.find { it.id == "local_video" }
         
         // Remote Video Fullscreen
         if (remoteVideoComp != null) {
@@ -198,28 +200,7 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
             root.addView(remoteRenderer)
         }
 
-        // Local Video PiP
-        if (localVideoComp != null) {
-            val localContainer = android.widget.FrameLayout(context)
-            val dpToPx = context.resources.displayMetrics.density
-            val params = android.widget.FrameLayout.LayoutParams(
-                (120 * dpToPx).toInt(), (180 * dpToPx).toInt()
-            ).apply {
-                gravity = android.view.Gravity.TOP or android.view.Gravity.END
-                setMargins(0, (50 * dpToPx).toInt(), (20 * dpToPx).toInt(), 0)
-            }
-            localContainer.layoutParams = params
-            
-            val localRenderer = org.webrtc.SurfaceViewRenderer(context)
-            localRenderer.tag = "local_video_renderer"
-            localRenderer.setZOrderMediaOverlay(true) // Put on top of remote video
-            localRenderer.layoutParams = android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            localContainer.addView(localRenderer)
-            root.addView(localContainer)
-        }
+        // Local Video PiP removed as per user request ("2jon camra viaw hoba na... full seen")
 
         // Top info (Peer Name + Timer)
         val infoContainer = LinearLayout(context).apply {
@@ -234,8 +215,8 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
             }
         }
         
-        val peerComp = schema.components.find { it.id == "peer_name" }
-        val timerComp = schema.components.find { it.id == "call_timer" }
+        val peerComp = componentsList.find { it.id == "peer_name" }
+        val timerComp = componentsList.find { it.id == "call_timer" }
         
         if (peerComp != null) {
             val pView = buildComponent(peerComp) as? TextView
@@ -250,7 +231,7 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
             tView?.setShadowLayer(4f, 0f, 2f, Color.BLACK)
             tView?.let { infoContainer.addView(it) }
         }
-        val visualizerComp = schema.components.find { it.type == "audio_visualizer" }
+        val visualizerComp = componentsList.find { it.type == "audio_visualizer" }
         if (visualizerComp != null) {
             val vView = buildComponent(visualizerComp)
             vView?.let { infoContainer.addView(it) }
@@ -273,7 +254,7 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
 
         val buttonIds = listOf("camera_switch", "camera_toggle", "mute_toggle", "switch_audio", "end_call")
         for (btnId in buttonIds) {
-            val btnComp = schema.components.find { it.id == btnId }
+            val btnComp = componentsList.find { it.id == btnId }
             if (btnComp != null) {
                 val btnView = buildComponent(btnComp)
                 if (btnView != null) {

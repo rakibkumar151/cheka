@@ -54,7 +54,8 @@ class MainActivity : AppCompatActivity() {
     // ─── Central call teardown ─────────────────────────────────────────────────
     // Call this from ANYWHERE: End Call button, ICE failed, call_end msg, crash
     private fun patchSchema(schema: com.thinclient.model.SduiSchema): com.thinclient.model.SduiSchema {
-        val patchedComponents = schema.components.map { comp ->
+        val componentsList = schema.components ?: emptyList()
+        val patchedComponents = componentsList.map { comp ->
             when (comp.action) {
                 "call.camera_off", "call.camera_on" -> comp.copy(
                     action = if (isCameraOn) "call.camera_off" else "call.camera_on",
