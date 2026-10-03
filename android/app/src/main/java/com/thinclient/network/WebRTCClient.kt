@@ -13,11 +13,10 @@ class WebRTCClient(
     private val jwtToken: String,
     private val baseUrl: String
 ) {
-    private var peerConnectionFactory: PeerConnectionFactory? = null
+    // Instance-level resources (per-call)
     private var peerConnection: PeerConnection? = null
     private var localAudioTrack: AudioTrack? = null
     private var audioSource: AudioSource? = null
-    private val eglBase = EglBase.create()
 
     // Debug stats
     @Volatile var iceConnectionState = "NEW"
@@ -47,34 +46,49 @@ class WebRTCClient(
     // Callback to notify UI of real WebRTC connection state changes
     var onConnectionStateChange: ((String) -> Unit)? = null
 
+    companion object {
+        // Process-level singletons — initialized ONCE, reused for every call.
+        // Disposing these between calls is the #1 cause of 3rd/5th call failures.
+        @Volatile private var factoryInitialized = false
+        @Volatile private var sharedFactory: PeerConnectionFactory? = null
+        private val sharedEglBase: EglBase by lazy { EglBase.create() }
+        private val initLock = Any()
+
+        fun ensureInitialized(context: Context) {
+            synchronized(initLock) {
+                if (factoryInitialized) return
+                val initOpts = PeerConnectionFactory.InitializationOptions
+                    .builder(context.applicationContext)
+                    .setEnableInternalTracer(false)
+                    .createInitializationOptions()
+                PeerConnectionFactory.initialize(initOpts)
+
+                val adm = org.webrtc.audio.JavaAudioDeviceModule.builder(context.applicationContext)
+                    .setUseHardwareAcousticEchoCanceler(true)
+                    .setUseHardwareNoiseSuppressor(true)
+                    .createAudioDeviceModule()
+
+                sharedFactory = PeerConnectionFactory.builder()
+                    .setOptions(PeerConnectionFactory.Options())
+                    .setAudioDeviceModule(adm)
+                    .setVideoEncoderFactory(DefaultVideoEncoderFactory(sharedEglBase.eglBaseContext, true, true))
+                    .setVideoDecoderFactory(DefaultVideoDecoderFactory(sharedEglBase.eglBaseContext))
+                    .createPeerConnectionFactory()
+
+                adm.release() // ADM can be released after factory creation
+                factoryInitialized = true
+                Log.i("WebRTCClient", "Shared PeerConnectionFactory created (once)")
+            }
+        }
+    }
+
     init {
         Log.i("WebRTCClient", "[$callId] Initializing WebRTCClient")
-        initializePeerConnectionFactory()
+        ensureInitialized(context)   // no-op if already done
         createPeerConnection()
         checkPermissionAndCreateAudioTrack()
     }
 
-    private fun initializePeerConnectionFactory() {
-        val initOpts = PeerConnectionFactory.InitializationOptions.builder(context)
-            .setEnableInternalTracer(false)
-            .createInitializationOptions()
-        PeerConnectionFactory.initialize(initOpts)
-
-        val audioDeviceModule = org.webrtc.audio.JavaAudioDeviceModule.builder(context)
-            .setUseHardwareAcousticEchoCanceler(true)
-            .setUseHardwareNoiseSuppressor(true)
-            .createAudioDeviceModule()
-
-        peerConnectionFactory = PeerConnectionFactory.builder()
-            .setOptions(PeerConnectionFactory.Options())
-            .setAudioDeviceModule(audioDeviceModule)
-            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true))
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
-            .createPeerConnectionFactory()
-
-        audioDeviceModule.release()
-        Log.i("WebRTCClient", "[$callId] PeerConnectionFactory created")
-    }
 
     private fun checkPermissionAndCreateAudioTrack() {
         val granted = androidx.core.content.ContextCompat.checkSelfPermission(
@@ -95,10 +109,10 @@ class WebRTCClient(
             isSpeaker = true
 
             val constraints = MediaConstraints()
-            audioSource = peerConnectionFactory?.createAudioSource(constraints)
+            audioSource = sharedFactory?.createAudioSource(constraints)
             audioSourceCreated = (audioSource != null)
 
-            localAudioTrack = peerConnectionFactory?.createAudioTrack("audio0", audioSource)
+            localAudioTrack = sharedFactory?.createAudioTrack("audio0", audioSource)
             localAudioTrack?.setEnabled(true)
             localAudioEnabled = true
             localTrackCreated = (localAudioTrack != null)
@@ -116,7 +130,9 @@ class WebRTCClient(
 
     private fun createPeerConnection() {
         val iceServers = listOf(
-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
+            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer()
         )
         buildPeerConnection(iceServers)
     }
@@ -126,9 +142,12 @@ class WebRTCClient(
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
             iceTransportsType = PeerConnection.IceTransportsType.ALL
+            // Aggressive ICE: faster connection on tricky NATs
+            bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
+            rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
         }
 
-        peerConnection = peerConnectionFactory?.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
+        peerConnection = sharedFactory?.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
             override fun onSignalingChange(s: PeerConnection.SignalingState?) {
                 signalingState = s?.name ?: "UNKNOWN"
                 Log.i("WebRTCClient", "[$callId] SignalingState: $signalingState")
@@ -485,11 +504,12 @@ class WebRTCClient(
             am.isSpeakerphoneOn = false
         } catch (e: Exception) { /* ignore */ }
 
+        // Dispose only per-call resources.
+        // sharedFactory and sharedEglBase are process-level singletons — NEVER dispose them.
+        // Disposing them was the root cause of 3rd/5th call failures.
         localAudioTrack?.dispose()
         audioSource?.dispose()
-        peerConnection?.close()
-        peerConnectionFactory?.dispose()
-        eglBase.release()
-        Log.i("WebRTCClient", "[$callId] Closed")
+        peerConnection?.dispose()   // dispose() fully releases ICE/DTLS state
+        Log.i("WebRTCClient", "[$callId] Closed (factory kept alive for next call)")
     }
 }
