@@ -1,4 +1,4 @@
-use libsql::{Builder, Database};
+use libsql::{Builder, Connection, Database};
 use tracing::info;
 
 pub async fn init_db(url: &str, token: &str) -> anyhow::Result<Database> {
