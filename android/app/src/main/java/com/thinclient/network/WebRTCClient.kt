@@ -239,24 +239,31 @@ class WebRTCClient(
         val localRenderer = root?.findViewWithTag<org.webrtc.SurfaceViewRenderer>("local_video_renderer")
         val remoteRenderer = root?.findViewWithTag<org.webrtc.SurfaceViewRenderer>("remote_video_renderer")
 
-        if (localRenderer != null && localRenderer != currentLocalRenderer) {
-            currentLocalRenderer?.let { localVideoTrack?.removeSink(it) }
-            try { localRenderer.init(sharedEglBase.eglBaseContext, null) } catch (e: Exception) {}
-            localRenderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-            localRenderer.setEnableHardwareScaler(true)
+        if (localRenderer != null) {
+            if (localRenderer != currentLocalRenderer) {
+                currentLocalRenderer?.let { localVideoTrack?.removeSink(it) }
+                try { localRenderer.init(sharedEglBase.eglBaseContext, null) } catch (e: Exception) {}
+                localRenderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                localRenderer.setEnableHardwareScaler(true)
+                currentLocalRenderer = localRenderer
+                Log.i("WebRTCClient", "[$callId] Initialized local video renderer")
+            }
+            // Always ensure the track is sinking to it
+            localVideoTrack?.removeSink(localRenderer)
             localVideoTrack?.addSink(localRenderer)
-            currentLocalRenderer = localRenderer
-            Log.i("WebRTCClient", "[$callId] Attached local video renderer")
         }
 
-        if (remoteRenderer != null && remoteRenderer != currentRemoteRenderer) {
-            currentRemoteRenderer?.let { remoteVideoTrack?.removeSink(it) }
-            try { remoteRenderer.init(sharedEglBase.eglBaseContext, null) } catch (e: Exception) {}
-            remoteRenderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-            remoteRenderer.setEnableHardwareScaler(true)
+        if (remoteRenderer != null) {
+            if (remoteRenderer != currentRemoteRenderer) {
+                currentRemoteRenderer?.let { remoteVideoTrack?.removeSink(it) }
+                try { remoteRenderer.init(sharedEglBase.eglBaseContext, null) } catch (e: Exception) {}
+                remoteRenderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                remoteRenderer.setEnableHardwareScaler(true)
+                currentRemoteRenderer = remoteRenderer
+                Log.i("WebRTCClient", "[$callId] Initialized remote video renderer")
+            }
+            remoteVideoTrack?.removeSink(remoteRenderer)
             remoteVideoTrack?.addSink(remoteRenderer)
-            currentRemoteRenderer = remoteRenderer
-            Log.i("WebRTCClient", "[$callId] Attached remote video renderer")
         }
     }
 
@@ -267,6 +274,7 @@ class WebRTCClient(
                 return
             }
             createVideoTrack()
+            startCall() // Trigger SDP renegotiation to send video
         } else {
             localVideoTrack?.setEnabled(enable)
         }
