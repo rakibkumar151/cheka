@@ -27,7 +27,7 @@ class ActionDispatcher(
         "call.start_video",
         "call.accept",
         "call.reject",
-        "call.end",
+        // "call.end" is handled directly in MainActivity before reaching ActionDispatcher
         "call.mute",
         "call.unmute",
         "call.camera_on",

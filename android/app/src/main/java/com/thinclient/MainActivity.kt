@@ -25,12 +25,12 @@ class MainActivity : AppCompatActivity() {
     private val baseUrl = "https://cheka.onrender.com"
     private val wsUrl = "wss://cheka.onrender.com/v1/ws"
     private var jwtToken: String = ""
+    private var myUid: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(android.widget.TextView(this).apply { text = "Authenticating..." })
 
-        // Request only RECORD_AUDIO — do NOT request CAMERA for audio calls
         if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO)
             != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             androidx.core.app.ActivityCompat.requestPermissions(
@@ -40,13 +40,79 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        val myUid = "usr_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12)
+        myUid = "usr_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12)
         Log.i("MainActivity", "Generated UID: $myUid")
         authenticate(myUid)
     }
 
-    private fun authenticate(myUid: String) {
-        val reqBody = gson.toJson(mapOf("user_id" to myUid)).toRequestBody("application/json".toMediaType())
+    // ─── Central call teardown ─────────────────────────────────────────────────
+    // Call this from ANYWHERE: End Call button, ICE failed, call_end msg, crash
+    private fun endCallAndGoHome(callId: String? = null) {
+        Log.i("MainActivity", "endCallAndGoHome callId=$callId")
+
+        // 1. Close WebRTC — safe to call even if already closed
+        val wc = webRTCClient
+        webRTCClient = null          // null FIRST so no re-entrant calls
+        wc?.close()
+
+        // 2. Notify server (fire-and-forget, failures are silent)
+        if (!callId.isNullOrBlank() && jwtToken.isNotBlank()) {
+            val reqBody = "".toRequestBody("application/json".toMediaType())
+            val req = Request.Builder()
+                .url("$baseUrl/v1/calls/$callId/reject")
+                .post(reqBody)
+                .addHeader("Authorization", "Bearer $jwtToken")
+                .build()
+            client.newCall(req).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) { /* silent */ }
+                override fun onResponse(call: Call, response: Response) { response.close() }
+            })
+        }
+
+        // 3. Navigate back to My UID home screen
+        runOnUiThread { showMyUidScreen() }
+    }
+
+    // ─── Home screen with user's UID ──────────────────────────────────────────
+    private fun showMyUidScreen() {
+        val schema = SduiSchema(
+            schema_version = 1,
+            screen = "home",
+            revision = 1,
+            title = "My UID",
+            components = listOf(
+                com.thinclient.model.SduiComponent(
+                    id = "lbl_uid",
+                    type = "text",
+                    text = myUid
+                ),
+                com.thinclient.model.SduiComponent(
+                    id = "btn_copy",
+                    type = "button",
+                    text = "Copy UID",
+                    action = "copy_text",
+                    data = myUid
+                ),
+                com.thinclient.model.SduiComponent(
+                    id = "inp_target",
+                    type = "input",
+                    text = "Enter target UID"
+                ),
+                com.thinclient.model.SduiComponent(
+                    id = "btn_call",
+                    type = "button",
+                    text = "Start Audio Call",
+                    action = "call.start_audio",
+                    data = "inp_target"
+                )
+            )
+        )
+        val view = sduiRenderer.render(schema)
+        setContentView(view)
+    }
+
+    private fun authenticate(uid: String) {
+        val reqBody = gson.toJson(mapOf("user_id" to uid)).toRequestBody("application/json".toMediaType())
         val req = Request.Builder().url("$baseUrl/v1/auth/anonymous").post(reqBody).build()
         client.newCall(req).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -71,16 +137,21 @@ class MainActivity : AppCompatActivity() {
         )
         wc.onConnectionStateChange = { state ->
             Log.i("MainActivity", "[$callId] WebRTC state → $state")
-            // Update debug panel call state label in real time
             runOnUiThread {
+                // Update debug view if present
                 val view = findViewById<android.view.View>(android.R.id.content)
                     ?.findViewWithTag<WebRTCDebugView>("audio_visualizer")
                 view?.iceState = wc.iceConnectionState
                 view?.pcState = wc.peerConnectionState
                 view?.updateStats(0, 0, 0, 0)
+
+                // Auto-navigate home on any terminal failure
+                if (state == "FAILED" && webRTCClient != null) {
+                    Log.i("MainActivity", "[$callId] ICE/Connection FAILED → auto going home")
+                    endCallAndGoHome(callId)
+                }
             }
         }
-        // wc.fetchTurnAndRestartIce() // DISABLED: Dynamic ICE config breaks Android WebRTC ICE gathering
         wc.startStatsTimer()
         return wc
     }
@@ -95,8 +166,14 @@ class MainActivity : AppCompatActivity() {
 
         sduiRenderer = SduiRenderer(this) { action, data ->
             when (action) {
-                "call.mute" -> webRTCClient?.setMuted(true)
+                "call.mute"   -> webRTCClient?.setMuted(true)
                 "call.unmute" -> webRTCClient?.setMuted(false)
+                "call.end"    -> {
+                    // End Call button pressed — close everything and go home
+                    val callId = data
+                    endCallAndGoHome(callId)
+                    return@SduiRenderer      // don't also dispatch to ActionDispatcher
+                }
             }
             actionDispatcher.dispatch(action, data)
         }
@@ -105,18 +182,16 @@ class MainActivity : AppCompatActivity() {
             try {
                 val message = gson.fromJson(text, JsonObject::class.java)
                 val msgType = message.get("type")?.asString
-                val callId = message.get("call_id")?.asString
+                val callId  = message.get("call_id")?.asString
 
                 when {
                     msgType == "call_accepted" && callId != null -> {
-                        // Caller path: server told us callee accepted → we create offer
                         runOnUiThread {
                             if (webRTCClient == null) {
                                 webRTCClient = createWebRTCClient(callId)
                                 webRTCClient?.startCall()
                             }
                         }
-                        // Also render SDUI if payload present
                         val payload = message.get("payload")
                         if (payload != null && !payload.isJsonNull) {
                             val schema = gson.fromJson(payload, SduiSchema::class.java)
@@ -138,11 +213,9 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
+                    // Both call_rejected and call_end → clean up and go home
                     msgType == "call_rejected" || msgType == "call_end" -> {
-                        runOnUiThread {
-                            webRTCClient?.close()
-                            webRTCClient = null
-                        }
+                        endCallAndGoHome(callId)
                         val payload = message.get("payload")
                         if (payload != null && !payload.isJsonNull) {
                             val schema = gson.fromJson(payload, SduiSchema::class.java)
@@ -154,7 +227,6 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     msgType == "call_offer" && callId != null -> {
-                        // Callee path: we receive the offer from caller
                         val payload = message.getAsJsonObject("payload")
                         val sdp = payload.get("sdp").asString
                         runOnUiThread {
@@ -172,18 +244,16 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     msgType == "call_ice" && callId != null -> {
-                        val payload = message.getAsJsonObject("payload")
+                        val payload   = message.getAsJsonObject("payload")
                         val candidate = payload.getAsJsonObject("candidate")
-                        val sdpMid = candidate.get("sdpMid").asString
+                        val sdpMid        = candidate.get("sdpMid").asString
                         val sdpMLineIndex = candidate.get("sdpMLineIndex").asInt
-                        val sdp = candidate.get("sdp").asString
-                        // ICE candidates must NOT be added on UI thread to avoid blocking
-                        // But ensure webRTCClient exists
+                        val sdp           = candidate.get("sdp").asString
                         runOnUiThread {
-                            if (webRTCClient == null) {
-                                webRTCClient = createWebRTCClient(callId)
+                            // Only add candidate if we still have an active client for THIS call
+                            if (webRTCClient != null) {
+                                webRTCClient?.handleIceCandidate(sdpMid, sdpMLineIndex, sdp)
                             }
-                            webRTCClient?.handleIceCandidate(sdpMid, sdpMLineIndex, sdp)
                         }
                     }
                 }
@@ -192,6 +262,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
         signalingClient?.connect()
+
+        // Show home screen immediately after init
+        showMyUidScreen()
     }
 
     override fun onDestroy() {
