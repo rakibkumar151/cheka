@@ -17,6 +17,10 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
     fun render(schema: SduiSchema): View {
         inputViews.clear()
 
+        if (schema.screen == "active_video_call") {
+            return buildActiveVideoCallLayout(schema)
+        }
+
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(32, 32, 32, 32)
@@ -169,5 +173,120 @@ class SduiRenderer(private val context: Context, private val actionDispatcher: (
             }
             else -> null
         }
+    }
+
+    private fun buildActiveVideoCallLayout(schema: SduiSchema): View {
+        val root = android.widget.FrameLayout(context)
+        root.layoutParams = android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+        )
+        root.setBackgroundColor(Color.BLACK)
+
+        // Find components from schema
+        val remoteVideoComp = schema.components.find { it.id == "remote_video" }
+        val localVideoComp = schema.components.find { it.id == "local_video" }
+        
+        // Remote Video Fullscreen
+        if (remoteVideoComp != null) {
+            val remoteRenderer = org.webrtc.SurfaceViewRenderer(context)
+            remoteRenderer.tag = "remote_video_renderer"
+            remoteRenderer.layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            root.addView(remoteRenderer)
+        }
+
+        // Local Video PiP
+        if (localVideoComp != null) {
+            val localContainer = android.widget.FrameLayout(context)
+            val dpToPx = context.resources.displayMetrics.density
+            val params = android.widget.FrameLayout.LayoutParams(
+                (120 * dpToPx).toInt(), (180 * dpToPx).toInt()
+            ).apply {
+                gravity = android.view.Gravity.TOP or android.view.Gravity.END
+                setMargins(0, (50 * dpToPx).toInt(), (20 * dpToPx).toInt(), 0)
+            }
+            localContainer.layoutParams = params
+            
+            val localRenderer = org.webrtc.SurfaceViewRenderer(context)
+            localRenderer.tag = "local_video_renderer"
+            localRenderer.setZOrderMediaOverlay(true) // Put on top of remote video
+            localRenderer.layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            localContainer.addView(localRenderer)
+            root.addView(localContainer)
+        }
+
+        // Top info (Peer Name + Timer)
+        val infoContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL
+                setMargins(0, (50 * context.resources.displayMetrics.density).toInt(), 0, 0)
+            }
+        }
+        
+        val peerComp = schema.components.find { it.id == "peer_name" }
+        val timerComp = schema.components.find { it.id == "call_timer" }
+        
+        if (peerComp != null) {
+            val pView = buildComponent(peerComp) as? TextView
+            pView?.setTextColor(Color.WHITE)
+            pView?.setShadowLayer(4f, 0f, 2f, Color.BLACK)
+            pView?.textSize = 24f
+            pView?.let { infoContainer.addView(it) }
+        }
+        if (timerComp != null) {
+            val tView = buildComponent(timerComp) as? TextView
+            tView?.setTextColor(Color.WHITE)
+            tView?.setShadowLayer(4f, 0f, 2f, Color.BLACK)
+            tView?.let { infoContainer.addView(it) }
+        }
+        
+        root.addView(infoContainer)
+
+        // Buttons Container at Bottom
+        val buttonsContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = android.view.Gravity.BOTTOM
+                setMargins(0, 0, 0, (60 * context.resources.displayMetrics.density).toInt())
+            }
+        }
+
+        val buttonIds = listOf("camera_switch", "camera_toggle", "mute_toggle", "switch_audio", "end_call")
+        for (btnId in buttonIds) {
+            val btnComp = schema.components.find { it.id == btnId }
+            if (btnComp != null) {
+                val btnView = buildComponent(btnComp)
+                if (btnView != null) {
+                    val lp = LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                    ).apply {
+                        setMargins(8, 0, 8, 0)
+                    }
+                    btnView.layoutParams = lp
+                    buttonsContainer.addView(btnView)
+                }
+            }
+        }
+        
+        root.addView(buttonsContainer)
+
+        return root
     }
 }

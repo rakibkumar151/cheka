@@ -190,6 +190,9 @@ class MainActivity : AppCompatActivity() {
             when (action) {
                 "call.mute"   -> webRTCClient?.setMuted(true)
                 "call.unmute" -> webRTCClient?.setMuted(false)
+                "call.camera_on" -> webRTCClient?.toggleVideo(true)
+                "call.camera_off" -> webRTCClient?.toggleVideo(false)
+                "call.camera_switch" -> webRTCClient?.switchCamera()
                 "call.end"    -> {
                     // End Call button pressed — close everything and go home
                     val callId = data

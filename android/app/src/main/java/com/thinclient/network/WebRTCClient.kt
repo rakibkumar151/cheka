@@ -260,6 +260,31 @@ class WebRTCClient(
         }
     }
 
+    fun toggleVideo(enable: Boolean) {
+        localVideoTrack?.setEnabled(enable)
+        Log.i("WebRTCClient", "[$callId] Local video track enabled: $enable")
+    }
+
+    fun switchCamera() {
+        try {
+            if (videoCapturer is org.webrtc.CameraVideoCapturer) {
+                val camCapturer = videoCapturer as org.webrtc.CameraVideoCapturer
+                camCapturer.switchCamera(object : org.webrtc.CameraVideoCapturer.CameraSwitchHandler {
+                    override fun onCameraSwitchDone(isFrontCamera: Boolean) {
+                        Log.i("WebRTCClient", "[$callId] Switched to ${if (isFrontCamera) "front" else "back"} camera")
+                    }
+                    override fun onCameraSwitchError(errorDescription: String?) {
+                        Log.e("WebRTCClient", "[$callId] Camera switch error: $errorDescription")
+                    }
+                })
+            } else {
+                Log.e("WebRTCClient", "[$callId] videoCapturer is not CameraVideoCapturer")
+            }
+        } catch (e: Exception) {
+            Log.e("WebRTCClient", "[$callId] Failed to switch camera", e)
+        }
+    }
+
     private fun createPeerConnection() {
         val iceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
